@@ -1,0 +1,25 @@
+# Environments
+.env
+.venv/
+env/
+venv/
+ENV/
+
+# Python caching
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Database
+startups.db
+*.db
+
+# Temporary downloaded files
+temp_audio_*
+*.webm
+*.m4a
+*.mp3
+
+# OS specific files
+.DS_Store
+Thumbs.db

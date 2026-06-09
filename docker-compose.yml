@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  discovery-agent:
+    build: .
+    image: startup-discovery-agent:latest
+    container_name: startup_discovery_agent
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./startups.db:/app/startups.db
+      - ./reports:/app/reports
+      - ./credentials.json:/app/credentials.json
+    env_file:
+      - .env
+    restart: unless-stopped
