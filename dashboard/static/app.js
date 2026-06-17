@@ -4,7 +4,16 @@ document.addEventListener("DOMContentLoaded", () => {
     let currentSearch = "";
     let currentRoundFilter = "";
     let currentSort = "date";
-    
+
+    // Shark Tank state
+    let stPage = 1;
+    const stPerPage = 20;
+    let stSeasonFilter = "";
+    let stSharkFilter = "";
+    let stDealFilter = "";
+
+    let activeTab = "dashboard"; // "dashboard" | "sharktank"
+
     let roundsChart = null;
     let investorsChart = null;
     
@@ -21,39 +30,36 @@ document.addEventListener("DOMContentLoaded", () => {
     fetchSummaryMetrics();
     fetchStartups();
     checkPipelineStatus();
-    
+
     setInterval(checkPipelineStatus, 5000);
-    
+
     runBtn.addEventListener("click", triggerPipelineRun);
-    
-    searchInput.addEventListener("input", debounce(() => {
-        currentSearch = searchInput.value;
-        currentPage = 1;
-        fetchStartups();
-    }, 300));
-    
-    roundFilter.addEventListener("change", () => {
-        currentRoundFilter = roundFilter.value;
-        currentPage = 1;
-        fetchStartups();
+
+    // Nav: Shark Tank tab
+    document.getElementById("nav-sharktank").addEventListener("click", (e) => {
+        e.preventDefault();
+        activeTab = "sharktank";
+        document.querySelectorAll(".nav-item").forEach(li => li.classList.remove("active"));
+        e.currentTarget.closest(".nav-item").classList.add("active");
+        document.getElementById("shark-tank-section").style.display = "block";
+        document.getElementById("startups-section").style.display = "none";
+        document.querySelectorAll(".charts-grid, .metrics-grid").forEach(el => {
+            if (!el.id.startsWith("st-")) el.style.display = "none";
+        });
+        loadSharkTankSummary();
+        loadSharkTankTable();
     });
-    
-    sortSelect.addEventListener("change", () => {
-        currentSort = sortSelect.value;
-        currentPage = 1;
-        fetchStartups();
-    });
-    
-    prevBtn.addEventListener("click", () => {
-        if (currentPage > 1) {
-            currentPage--;
-            fetchStartups();
-        }
-    });
-    
-    nextBtn.addEventListener("click", () => {
-        currentPage++;
-        fetchStartups();
+
+    document.getElementById("nav-dashboard").addEventListener("click", (e) => {
+        e.preventDefault();
+        activeTab = "dashboard";
+        document.querySelectorAll(".nav-item").forEach(li => li.classList.remove("active"));
+        e.currentTarget.closest(".nav-item").classList.add("active");
+        document.getElementById("shark-tank-section").style.display = "none";
+        document.getElementById("startups-section").style.display = "block";
+        document.querySelectorAll(".charts-grid, .metrics-grid").forEach(el => {
+            el.style.display = "";
+        });
     });
 
     document.getElementById("nav-startups").addEventListener("click", (e) => {
@@ -61,13 +67,50 @@ document.addEventListener("DOMContentLoaded", () => {
         document.getElementById("startups-section").scrollIntoView({ behavior: 'smooth' });
     });
 
+    searchInput.addEventListener("input", debounce(() => {
+        currentSearch = searchInput.value;
+        currentPage = 1;
+        fetchStartups();
+    }, 300));
+
+    roundFilter.addEventListener("change", () => {
+        currentRoundFilter = roundFilter.value;
+        currentPage = 1;
+        fetchStartups();
+    });
+
+    sortSelect.addEventListener("change", () => {
+        currentSort = sortSelect.value;
+        currentPage = 1;
+        fetchStartups();
+    });
+
+    prevBtn.addEventListener("click", () => {
+        if (currentPage > 1) { currentPage--; fetchStartups(); }
+    });
+    nextBtn.addEventListener("click", () => { currentPage++; fetchStartups(); });
+
+    // Shark Tank filters
+    document.getElementById("st-season-filter").addEventListener("change", (e) => {
+        stSeasonFilter = e.target.value; stPage = 1; loadSharkTankTable();
+    });
+    document.getElementById("st-shark-filter").addEventListener("change", (e) => {
+        stSharkFilter = e.target.value; stPage = 1; loadSharkTankTable();
+    });
+    document.getElementById("st-deal-filter").addEventListener("change", (e) => {
+        stDealFilter = e.target.value; stPage = 1; loadSharkTankTable();
+    });
+    document.getElementById("st-prev-btn").addEventListener("click", () => {
+        if (stPage > 1) { stPage--; loadSharkTankTable(); }
+    });
+    document.getElementById("st-next-btn").addEventListener("click", () => {
+        stPage++; loadSharkTankTable();
+    });
+
     function debounce(func, wait) {
         let timeout;
         return function executedFunction(...args) {
-            const later = () => {
-                clearTimeout(timeout);
-                func(...args);
-            };
+            const later = () => { clearTimeout(timeout); func(...args); };
             clearTimeout(timeout);
             timeout = setTimeout(later, wait);
         };
@@ -212,19 +255,96 @@ document.addEventListener("DOMContentLoaded", () => {
                 tr.appendChild(verCell);
                 
                 const sourceCell = document.createElement("td");
-                sourceCell.innerHTML = `
-                    <a href="${s.source_video_url}" target="_blank" class="video-link-icon">
+                const src = s.source || "youtube";
+                const srcLabel = src === "inc42" ? `<span style="background:rgba(234,88,12,0.2);color:#fb923c;padding:2px 8px;border-radius:20px;font-size:0.75rem;">Inc42</span>`
+                    : `<a href="${s.source_video_url}" target="_blank" class="video-link-icon">
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
                             <path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/>
                         </svg>
-                    </a>
-                `;
+                    </a>`;
+                sourceCell.innerHTML = srcLabel;
                 tr.appendChild(sourceCell);
-                
+
                 tableBody.appendChild(tr);
             });
         } catch (error) {
             console.error("Error fetching startups list:", error);
+        }
+    }
+
+    // ===================== SHARK TANK FUNCTIONS =====================
+
+    async function loadSharkTankSummary() {
+        try {
+            const res = await fetch("/api/shark-tank/summary");
+            const d = await res.json();
+            document.getElementById("st-total").textContent = d.total_startups;
+            document.getElementById("st-deals").textContent = d.deals_made;
+            document.getElementById("st-nodeal").textContent = d.no_deal;
+            document.getElementById("st-deal-rate").textContent = `${d.deal_rate_pct}% success rate`;
+            if (d.top_sharks && d.top_sharks.length > 0) {
+                const top = d.top_sharks[0];
+                document.getElementById("st-top-shark").textContent = `${top.name} (${top.deals} deals)`;
+            }
+        } catch(e) { console.error("ST summary error:", e); }
+    }
+
+    async function loadSharkTankTable() {
+        const tbody = document.getElementById("st-table-body");
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-secondary);padding:2rem;">Loading...</td></tr>`;
+        try {
+            let url = `/api/shark-tank?page=${stPage}&limit=${stPerPage}`;
+            if (stSeasonFilter) url += `&season=${stSeasonFilter}`;
+            if (stSharkFilter) url += `&shark=${encodeURIComponent(stSharkFilter)}`;
+            if (stDealFilter !== "") url += `&deal_made=${stDealFilter}`;
+
+            const res = await fetch(url);
+            const d = await res.json();
+
+            const total = d.total;
+            const offset = (stPage - 1) * stPerPage;
+            document.getElementById("st-pagination-info").textContent =
+                `Showing ${total === 0 ? 0 : offset + 1}–${Math.min(offset + stPerPage, total)} of ${total}`;
+            document.getElementById("st-prev-btn").disabled = stPage <= 1;
+            document.getElementById("st-next-btn").disabled = stPage >= d.total_pages;
+
+            if (d.data.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-secondary);padding:2rem;">No results found.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = "";
+            const SHARK_COLORS = {
+                "Aman Gupta":    "#06b6d4",
+                "Namita Thapar": "#ec4899",
+                "Peyush Bansal": "#8b5cf6",
+                "Anupam Mittal": "#f59e0b",
+                "Vineeta Singh": "#10b981",
+                "Ashneer Grover":"#ef4444",
+                "Ghazal Alagh":  "#a78bfa",
+                "Amit Jain":     "#34d399",
+                "Radhika Gupta": "#fb923c",
+                "Kunal Bahl":    "#60a5fa",
+            };
+
+            d.data.forEach(s => {
+                const tr = document.createElement("tr");
+
+                tr.innerHTML = `
+                    <td class="startup-name-cell">${s.website ? `<a href="${s.website}" target="_blank" class="website-link">${s.name} ↗</a>` : s.name}</td>
+                    <td><span class="round-badge">S${s.season || '?'}</span></td>
+                    <td>${s.sector || 'Unknown'}</td>
+                    <td class="amount-text">${s.ask_amount || 'N/A'}</td>
+                    <td class="amount-text">${s.deal_made ? (s.deal_amount || 'Deal') : '<span style="color:var(--text-muted)">—</span>'}</td>
+                    <td>${s.equity_pct != null ? s.equity_pct + '%' : '—'}</td>
+                    <td>${(s.sharks || []).map(sh => `<span class="investor-tag" style="border-color:${SHARK_COLORS[sh] || '#9ca3af'}40;color:${SHARK_COLORS[sh] || '#9ca3af'}">${sh.split(' ')[0]}</span>`).join('') || '<span style="color:var(--text-muted)">—</span>'}</td>
+                    <td>${s.deal_made ? '<span style="color:#10b981;font-weight:600;">✅ Deal</span>' : '<span style="color:#ef4444;">❌ No Deal</span>'}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        } catch(e) {
+            console.error("ST table error:", e);
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:2rem;">Error loading data.</td></tr>`;
         }
     }
 

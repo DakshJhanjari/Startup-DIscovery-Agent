@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func
 
 from db.connection import get_db, init_db
-from db.models import Startup, ProcessedVideo
+from db.models import Startup, ProcessedVideo, SharkTankStartup
 from pipeline import PipelineRunner
 from scheduler import PipelineScheduler
 
@@ -116,6 +116,7 @@ def get_summary_metrics():
 def get_startups(
     search: str = Query(None, description="Search by name, investors, or industry"),
     round_filter: str = Query(None, description="Filter by funding round"),
+    source_filter: str = Query(None, description="Filter by source: 'youtube', 'inc42'"),
     min_confidence: float = Query(None, description="Filter by minimum confidence score"),
     sort_by: str = Query("date", description="Sort by 'date', 'amount', or 'confidence'"),
     order: str = Query("desc", description="Sort order: 'asc' or 'desc'"),
@@ -136,6 +137,9 @@ def get_startups(
             
         if round_filter:
             query = query.filter(Startup.funding_round == round_filter)
+
+        if source_filter:
+            query = query.filter(Startup.source == source_filter)
             
         if min_confidence is not None:
             query = query.filter(Startup.confidence_score >= min_confidence)
@@ -169,3 +173,84 @@ if os.path.exists(static_dir):
     app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 else:
     logger.warning("Static directory not found. Serving API endpoints only.")
+
+
+@app.get("/api/shark-tank")
+def get_shark_tank_startups(
+    season: int = Query(None, description="Filter by season (1-4)"),
+    shark: str = Query(None, description="Filter by shark name"),
+    sector: str = Query(None, description="Filter by sector"),
+    deal_made: bool = Query(None, description="Filter by whether a deal was made"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200)
+):
+    """Returns paginated Shark Tank India startup data."""
+    with get_db() as db:
+        query = db.query(SharkTankStartup)
+
+        if season is not None:
+            query = query.filter(SharkTankStartup.season == season)
+        if sector:
+            query = query.filter(SharkTankStartup.sector.ilike(f"%{sector}%"))
+        if deal_made is not None:
+            query = query.filter(SharkTankStartup.deal_made == (1 if deal_made else 0))
+
+        all_items = query.all()
+
+        # Shark filter (JSON list field)
+        if shark:
+            all_items = [
+                s for s in all_items
+                if s.sharks and any(shark.lower() in sh.lower() for sh in s.sharks)
+            ]
+
+        total = len(all_items)
+        offset = (page - 1) * limit
+        page_items = all_items[offset: offset + limit]
+
+        return {
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": (total + limit - 1) // limit,
+            "data": [s.to_dict() for s in page_items]
+        }
+
+
+@app.get("/api/shark-tank/summary")
+def get_shark_tank_summary():
+    """Returns summary stats for the Shark Tank India tab."""
+    with get_db() as db:
+        total = db.query(SharkTankStartup).count()
+        deals_made = db.query(SharkTankStartup).filter(SharkTankStartup.deal_made == 1).count()
+
+        # Sharks leaderboard
+        all_items = db.query(SharkTankStartup).filter(SharkTankStartup.deal_made == 1).all()
+        shark_counts = {}
+        for item in all_items:
+            for sh in (item.sharks or []):
+                shark_counts[sh] = shark_counts.get(sh, 0) + 1
+        top_sharks = sorted(shark_counts.items(), key=lambda x: x[1], reverse=True)
+
+        # Sector breakdown
+        sector_counts = {}
+        for item in db.query(SharkTankStartup).all():
+            s = item.sector or "Unknown"
+            sector_counts[s] = sector_counts.get(s, 0) + 1
+
+        # Season breakdown
+        season_counts = {}
+        for item in db.query(SharkTankStartup).all():
+            key = f"Season {item.season}" if item.season else "Unknown"
+            season_counts[key] = season_counts.get(key, 0) + 1
+
+        return {
+            "total_startups": total,
+            "deals_made": deals_made,
+            "no_deal": total - deals_made,
+            "deal_rate_pct": round((deals_made / total * 100) if total else 0, 1),
+            "top_sharks": [{"name": n, "deals": c} for n, c in top_sharks[:8]],
+            "sector_breakdown": sector_counts,
+            "season_breakdown": season_counts,
+        }
+
