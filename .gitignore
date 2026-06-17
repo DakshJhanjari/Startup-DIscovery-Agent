@@ -23,3 +23,7 @@ temp_audio_*
 # OS specific files
 .DS_Store
 Thumbs.db
+
+# Google Service Account credentials (NEVER commit)
+credentials.json
+credentials.json.json
