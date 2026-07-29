@@ -10,7 +10,7 @@ import requests
 import feedparser
 from bs4 import BeautifulSoup
 from typing import List, Dict, Any, Optional
-import google.generativeai as genai
+from google import genai
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -49,11 +49,9 @@ FUNDING_KEYWORDS = [
 
 class Inc42Scraper:
     def __init__(self):
-        api_key = os.getenv("GEMINI_API_KEY")
-        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
-        if api_key:
-            genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(model_name)
+        self.api_key = os.getenv("GEMINI_API_KEY")
+        self.model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         self.lookback_hours = int(os.getenv("SEARCH_LOOKBACK_HOURS", "24"))
 
     # ------------------------------------------------------------------
@@ -183,7 +181,12 @@ Rules:
 - confidence_score: 0.9 if clear funding round + amount, 0.7 if partial info, 0.5 if inferred
 """
         try:
-            response = self.model.generate_content(prompt)
+            if not self.client:
+                return None
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt
+            )
             text = response.text.strip()
 
             # Strip markdown code fences if present

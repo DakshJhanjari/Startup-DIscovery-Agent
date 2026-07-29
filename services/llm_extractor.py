@@ -14,6 +14,7 @@ class ExtractedStartup(BaseModel):
     funding_round: Optional[str] = Field(default=None, description="Funding round category (e.g. Pre-Seed, Seed, Series A, Series B, Series C, Debt, Grant, Strategic, Unknown)")
     investors: List[str] = Field(default=[], description="List of investor/VC names or accelerators (e.g. Peak XV Partners, Blume Ventures, Elevation Capital, Y Combinator, Accel India) mentioned as participating")
     industry: Optional[str] = Field(default=None, description="The industry/sector of the startup (e.g., AI, SaaS, FinTech, EdTech, Agtech, HealthTech, D2C)")
+    hq: Optional[str] = Field(default=None, description="Headquarters city of the startup if visible (e.g., Bengaluru, Mumbai, Delhi-NCR, Gurugram, Surat, Chennai). Leave null if not visible.")
     timestamp: Optional[str] = Field(default=None, description="Approximate timestamp in MM:SS where this startup is discussed, or null")
     confidence_score: float = Field(description="Confidence score from 0.0 to 1.0 assessing how clearly and unambiguously this funding news is stated")
 
@@ -27,6 +28,39 @@ class LLMExtractorService:
         self.openai_key = os.getenv("OPENAI_API_KEY")
         self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
 
+    def _condense_transcript(self, text: str) -> str:
+        """
+        Removes conversational filler words and cleans up transcript text
+        to reduce input tokens while preserving numerical and noun details.
+        """
+        if not text:
+            return ""
+        # 1. Strip common filler phrases (with surrounding spacing)
+        fillers = [
+            r"\bso basically\b", r"\byou know\b", r"\bkind of\b", r"\bsort of\b",
+            r"\bto be honest\b", r"\bI mean\b", r"\byou know what I mean\b",
+            r"\bhonestly\b", r"\bactually\b", r"\bdefinitely\b", r"\bbasically\b",
+            r"\bsubscribe to the channel\b", r"\bhit the bell icon\b",
+            r"\bwelcome back to\b", r"\bwelcome to my channel\b",
+            r"\bdon't forget to like\b"
+        ]
+        
+        condensed = text
+        import re
+        for filler in fillers:
+            condensed = re.sub(filler, "", condensed, flags=re.IGNORECASE)
+            
+        # 2. Collapse multiple spaces
+        condensed = re.sub(r"\s+", " ", condensed).strip()
+        
+        # Log difference in word count
+        orig_words = len(text.split())
+        new_words = len(condensed.split())
+        pct = ((orig_words - new_words) / orig_words) * 100 if orig_words > 0 else 0
+        logger.info(f"Transcript condensed from {orig_words} to {new_words} words (shaved {pct:.1f}% of tokens).")
+        
+        return condensed
+
     def extract_startups(self, transcript_text: str) -> List[ExtractedStartup]:
         """
         Runs the LLM over the transcript to extract funded startup details.
@@ -35,6 +69,8 @@ class LLMExtractorService:
         if not transcript_text or len(transcript_text.strip()) < 50:
             logger.info("Transcript text too short; skipping LLM extraction.")
             return []
+
+        condensed_text = self._condense_transcript(transcript_text)
 
         prompt = (
             "You are an expert venture capital research analyst specializing in the Indian startup ecosystem.\n"
@@ -48,7 +84,7 @@ class LLMExtractorService:
             "- ₹83 Crore = $10M = 10,000,000 USD\n"
             "- 8.3 Lakhs = $10K = 10,000 USD\n\n"
             "Here is the transcript:\n"
-            f"--- START TRANSCRIPT ---\n{transcript_text}\n--- END TRANSCRIPT ---"
+            f"--- START TRANSCRIPT ---\n{condensed_text}\n--- END TRANSCRIPT ---"
         )
 
         if self.gemini_key:

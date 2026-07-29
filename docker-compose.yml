@@ -1,16 +1,16 @@
-version: '3.8'
-
 services:
-  discovery-agent:
+  app:
     build: .
-    image: startup-discovery-agent:latest
-    container_name: startup_discovery_agent
+    container_name: startup-agent
+    restart: always
     ports:
-      - "8000:8000"
+      - "80:8000"
     volumes:
       - ./startups.db:/app/startups.db
       - ./reports:/app/reports
-      - ./credentials.json:/app/credentials.json
-    env_file:
-      - .env
-    restart: unless-stopped
+    environment:
+      - PORT=8000
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - GOOGLE_SHEETS_CREDENTIALS_JSON=${GOOGLE_SHEETS_CREDENTIALS_JSON}
+      - GOOGLE_SHEETS_SPREADSHEET_ID=${GOOGLE_SHEETS_SPREADSHEET_ID}

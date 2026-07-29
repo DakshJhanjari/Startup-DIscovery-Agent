@@ -4,12 +4,14 @@ import logging
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sqlalchemy import func
 
 from db.connection import get_db, init_db
-from db.models import Startup, ProcessedVideo, SharkTankStartup
+from db.models import Startup, ProcessedVideo, SharkTankStartup, LeadProfile
 from pipeline import PipelineRunner
 from scheduler import PipelineScheduler
+from services.linkedin_finder import LinkedInFinderService
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,6 +25,7 @@ app = FastAPI(
 
 runner = PipelineRunner()
 scheduler = PipelineScheduler()
+lead_finder = LinkedInFinderService()
 
 @app.on_event("startup")
 def startup_event():
@@ -168,12 +171,6 @@ def get_startups(
             "data": [s.to_dict() for s in startups]
         }
 
-static_dir = os.path.join(os.path.dirname(__file__), "static")
-if os.path.exists(static_dir):
-    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
-else:
-    logger.warning("Static directory not found. Serving API endpoints only.")
-
 
 @app.get("/api/shark-tank")
 def get_shark_tank_startups(
@@ -253,4 +250,329 @@ def get_shark_tank_summary():
             "sector_breakdown": sector_counts,
             "season_breakdown": season_counts,
         }
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn Leads API Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/leads")
+def get_leads(
+    search: str = Query(None, description="Search by startup name or person name"),
+    role_filter: str = Query(None, description="Filter by role (e.g., 'Founder', 'CTO', 'HR')"),
+    startup_id: int = Query(None, description="Filter by startup ID"),
+    min_confidence: float = Query(None, description="Filter by minimum confidence score (0.0–1.0)"),
+    source_filter: str = Query(None, description="Filter by source: 'website_scrape' or 'google_dork'"),
+    sort_by: str = Query("date", description="Sort by 'date' or 'confidence'"),
+    order: str = Query("desc", description="Sort order: 'asc' or 'desc'"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(25, ge=1, le=100),
+):
+    """Returns a paginated, filterable list of discovered LinkedIn leads."""
+    with get_db() as db:
+        query = db.query(LeadProfile)
+
+        if search:
+            pattern = f"%{search}%"
+            query = query.filter(
+                (LeadProfile.startup_name.like(pattern)) |
+                (LeadProfile.name.like(pattern)) |
+                (LeadProfile.role.like(pattern))
+            )
+        if role_filter:
+            query = query.filter(LeadProfile.role.ilike(f"%{role_filter}%"))
+        if startup_id is not None:
+            query = query.filter(LeadProfile.startup_id == startup_id)
+        if min_confidence is not None:
+            query = query.filter(LeadProfile.confidence_score >= min_confidence)
+        if source_filter:
+            query = query.filter(LeadProfile.source == source_filter)
+
+        sort_col = LeadProfile.confidence_score if sort_by == "confidence" else LeadProfile.created_at
+        query = query.order_by(sort_col.desc() if order == "desc" else sort_col.asc())
+
+        total = query.count()
+        offset = (page - 1) * limit
+        leads = query.offset(offset).limit(limit).all()
+
+        return {
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": (total + limit - 1) // limit,
+            "data": [l.to_dict() for l in leads],
+        }
+
+
+@app.get("/api/leads/startup/{startup_id}")
+def get_leads_for_startup(startup_id: int):
+    """Returns all LinkedIn leads associated with a specific startup."""
+    with get_db() as db:
+        startup = db.query(Startup).filter(Startup.id == startup_id).first()
+        if not startup:
+            raise HTTPException(status_code=404, detail=f"Startup with id={startup_id} not found.")
+
+        leads = db.query(LeadProfile).filter(LeadProfile.startup_id == startup_id).all()
+        return {
+            "startup_id": startup_id,
+            "startup_name": startup.name,
+            "total_leads": len(leads),
+            "data": [l.to_dict() for l in leads],
+        }
+
+
+@app.get("/api/leads/summary")
+def get_leads_summary():
+    """Returns aggregated statistics about discovered LinkedIn leads."""
+    with get_db() as db:
+        total = db.query(LeadProfile).count()
+        startups_covered = db.query(LeadProfile.startup_id).distinct().count()
+
+        # Breakdown by role
+        from sqlalchemy import func
+        role_counts = db.query(LeadProfile.role, func.count(LeadProfile.id))\
+            .group_by(LeadProfile.role).all()
+        role_breakdown = {r: c for r, c in role_counts if r}
+
+        # Breakdown by source
+        source_counts = db.query(LeadProfile.source, func.count(LeadProfile.id))\
+            .group_by(LeadProfile.source).all()
+        source_breakdown = {s: c for s, c in source_counts if s}
+
+        return {
+            "total_leads": total,
+            "startups_covered": startups_covered,
+            "role_breakdown": role_breakdown,
+            "source_breakdown": source_breakdown,
+        }
+
+
+is_lead_finder_running = False
+
+
+@app.post("/api/leads/find/{startup_id}")
+def trigger_lead_finder(startup_id: int, background_tasks: BackgroundTasks):
+    """Triggers on-demand LinkedIn lead discovery for a specific startup."""
+    global is_lead_finder_running
+    if is_lead_finder_running:
+        return {"status": "running", "message": "Lead finder is already running in the background."}
+
+    with get_db() as db:
+        startup = db.query(Startup).filter(Startup.id == startup_id).first()
+        if not startup:
+            raise HTTPException(status_code=404, detail=f"Startup with id={startup_id} not found.")
+        startup_name = startup.name
+        startup_website = startup.website
+        startup_industry = startup.industry
+
+    def _run_lead_finder():
+        global is_lead_finder_running
+        is_lead_finder_running = True
+        try:
+            from services.sheets import GoogleSheetsService
+            leads = lead_finder.find_leads(
+                startup_name=startup_name,
+                website=startup_website,
+                industry=startup_industry,
+            )
+            saved = 0
+            lead_dicts = []
+            with get_db() as db:
+                startup_obj = db.query(Startup).filter(Startup.id == startup_id).first()
+                for lead in leads:
+                    existing = db.query(LeadProfile).filter(
+                        LeadProfile.linkedin_url == lead.linkedin_url
+                    ).first()
+                    if existing:
+                        continue
+                    profile = LeadProfile(
+                        startup_id=startup_id,
+                        startup_name=startup_name,
+                        name=lead.name,
+                        role=lead.role,
+                        linkedin_url=lead.linkedin_url,
+                        confidence_score=lead.confidence_score,
+                        source=lead.source if hasattr(lead, "source") else "google_dork",
+                    )
+                    db.add(profile)
+                    lead_dicts.append(profile.to_dict())
+                    saved += 1
+            logger.info(f"On-demand lead finder saved {saved} lead(s) for '{startup_name}'.")
+            if lead_dicts:
+                GoogleSheetsService().sync_leads(lead_dicts)
+        except Exception as e:
+            logger.error(f"On-demand lead finder failed for startup_id={startup_id}: {e}")
+        finally:
+            is_lead_finder_running = False
+
+    background_tasks.add_task(_run_lead_finder)
+    return {"status": "started", "message": f"Lead finder started for '{startup_name}' in the background."}
+
+
+is_leads_batch_running = False
+is_report_running = False
+is_sheets_running = False
+
+@app.post("/api/run-leads")
+def run_leads_batch(background_tasks: BackgroundTasks):
+    global is_leads_batch_running
+    if is_leads_batch_running:
+        return {"status": "running", "message": "Lead finder is already running."}
+    
+    def _run_leads():
+        global is_leads_batch_running
+        is_leads_batch_running = True
+        try:
+            logger.info("Running batched lead finder...")
+            from services.sheets import GoogleSheetsService
+            sheets = GoogleSheetsService()
+            
+            with get_db() as db:
+                startups_with_leads = {row.startup_id for row in db.query(LeadProfile.startup_id).all() if row.startup_id is not None}
+                query = db.query(Startup).filter(Startup.confidence_score >= 0.6)
+                if startups_with_leads:
+                    query = query.filter(~Startup.id.in_(startups_with_leads))
+                candidates = query.all()
+            
+            logger.info(f"Found {len(candidates)} startups to process in batches of 5.")
+            
+            batch_size = 5
+            for idx in range(0, len(candidates), batch_size):
+                chunk = candidates[idx:idx+batch_size]
+                batch_dicts = [{"name": s.name, "website": s.website, "industry": s.industry} for s in chunk]
+                
+                try:
+                    leads = lead_finder.find_leads_batch(batch_dicts)
+                except Exception as e:
+                    logger.error(f"Lead finding batch failed: {e}")
+                    continue
+                
+                startup_map = {s.name.lower(): s.id for s in chunk}
+                batch_leads_dicts = []
+                
+                with get_db() as db:
+                    for lead in leads:
+                        startup_id = startup_map.get(lead.startup_name.lower())
+                        if not startup_id:
+                            existing_s = db.query(Startup).filter(Startup.name.ilike(lead.startup_name)).first()
+                            if existing_s:
+                                startup_id = existing_s.id
+                        if not startup_id:
+                            continue
+                        
+                        existing = db.query(LeadProfile).filter(LeadProfile.linkedin_url == lead.linkedin_url).first()
+                        if existing:
+                           continue
+                        
+                        profile = LeadProfile(
+                            startup_id=startup_id,
+                            startup_name=lead.startup_name,
+                            name=lead.name,
+                            role=lead.role,
+                            linkedin_url=lead.linkedin_url,
+                            confidence_score=lead.confidence_score,
+                            source=lead.source if hasattr(lead, "source") else "google_dork",
+                        )
+                        db.add(profile)
+                        batch_leads_dicts.append(profile.to_dict())
+                    
+                    if batch_leads_dicts:
+                        db.commit()
+                        try:
+                            sheets.sync_leads(batch_leads_dicts)
+                        except Exception as e:
+                            logger.error(f"Sheets leads sync failed for batch: {e}")
+                            
+        except Exception as e:
+            logger.error(f"Batch lead finder failed: {e}")
+        finally:
+            is_leads_batch_running = False
+
+    background_tasks.add_task(_run_leads)
+    return {"status": "started", "message": "Batch lead finder started in the background."}
+
+@app.post("/api/run-report")
+def run_report(background_tasks: BackgroundTasks):
+    global is_report_running
+    if is_report_running:
+        return {"status": "running", "message": "Report generation is already running."}
+
+    def _run_report():
+        global is_report_running
+        is_report_running = True
+        try:
+            logger.info("Running manual daily report generation...")
+            from services.reporter import ReporterService
+            with get_db() as db:
+                today = datetime.datetime.utcnow().date()
+                start_of_today = datetime.datetime.combine(today, datetime.time.min)
+                startups = db.query(Startup).filter(Startup.created_at >= start_of_today).all()
+                startup_dicts = [s.to_dict() for s in startups]
+            
+            ReporterService().generate_daily_report(startup_dicts)
+            logger.info("Daily report generated successfully.")
+        except Exception as e:
+            logger.error(f"Report generation failed: {e}")
+        finally:
+            is_report_running = False
+
+    background_tasks.add_task(_run_report)
+    return {"status": "started", "message": "Report generation started in the background."}
+
+@app.post("/api/run-sheets")
+def run_sheets(background_tasks: BackgroundTasks):
+    global is_sheets_running
+    if is_sheets_running:
+        return {"status": "running", "message": "Google Sheets sync is already running."}
+
+    def _run_sheets():
+        global is_sheets_running
+        is_sheets_running = True
+        try:
+            logger.info("Running manual Google Sheets full sync...")
+            from services.sheets import GoogleSheetsService
+            sheets = GoogleSheetsService()
+            with get_db() as db:
+                startups = db.query(Startup).all()
+                startup_dicts = [s.to_dict() for s in startups]
+                if startup_dicts:
+                    sheets.sync_startups(startup_dicts)
+                
+                leads = db.query(LeadProfile).all()
+                lead_dicts = [l.to_dict() for l in leads]
+                if lead_dicts:
+                    sheets.sync_leads(lead_dicts)
+            logger.info("Google Sheets full sync completed successfully.")
+        except Exception as e:
+            logger.error(f"Google Sheets sync failed: {e}")
+        finally:
+            is_sheets_running = False
+
+    background_tasks.add_task(_run_sheets)
+    return {"status": "started", "message": "Google Sheets sync started in the background."}
+
+class RAGQueryRequest(BaseModel):
+    query: str
+
+@app.post("/api/rag/ask")
+def rag_ask(req: RAGQueryRequest):
+    if not req.query or not req.query.strip():
+        raise HTTPException(status_code=400, detail="Query string is required")
+    try:
+        from services.rag_service import RAGService
+        rag = RAGService()
+        answer = rag.answer_question(req.query.strip())
+        return {"status": "success", "answer": answer}
+    except Exception as e:
+        logger.error(f"RAG endpoint failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Mount static files last so specific API routes are not intercepted
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.exists(static_dir):
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+else:
+    logger.warning("Static directory not found. Serving API endpoints only.")
+
 

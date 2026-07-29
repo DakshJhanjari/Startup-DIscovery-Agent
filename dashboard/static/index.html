@@ -39,11 +39,19 @@
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a href="#" id="nav-sharktank">
+                    <a href="#sharktank-section" id="nav-sharktank">
                         <svg viewBox="0 0 24 24" fill="currentColor">
                             <path d="M20 6h-2.18c.07-.44.18-.87.18-1.32C18 2.55 15.45 1 13 1c-1.35 0-2.6.5-3.54 1.32L8 3.67 6.54 2.32C5.6 1.5 4.35 1 3 1 .55 1-2 2.55-2 4.68c0 .45.11.88.18 1.32H-2C-3.1 6-4 6.9-4 8v12c0 1.1.9 2 2 2h20c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-9 10H9v-2h2v2zm0-4H9V8h2v4zm4 4h-2v-2h2v2zm0-4h-2V8h2v4z"/>
                         </svg>
                         Shark Tank India
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#rag-section" id="nav-rag">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 16h-2v-2h2v2zm1.07-7.75l-.9.92C12.45 11.9 12 12.5 12 14h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/>
+                        </svg>
+                        AI RAG Assistant
                     </a>
                 </li>
             </ul>
@@ -118,6 +126,22 @@
             </div>
         </section>
 
+        <section class="section-card pipeline-controls" style="margin-bottom: 2rem;">
+            <div class="chart-title" style="margin-bottom: 1rem;">Modular Pipeline Controls</div>
+            <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.9rem;">Run specific parts of the discovery pipeline on demand without running the full end-to-end workflow.</p>
+            <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                <button id="btn-run-leads" class="action-btn" style="background: var(--surface-light); color: var(--text-primary); border: 1px solid var(--border);">
+                    <span id="text-run-leads">👔 Find LinkedIn Leads</span>
+                </button>
+                <button id="btn-run-report" class="action-btn" style="background: var(--surface-light); color: var(--text-primary); border: 1px solid var(--border);">
+                    <span id="text-run-report">📊 Generate Daily Report</span>
+                </button>
+                <button id="btn-run-sheets" class="action-btn" style="background: var(--surface-light); color: var(--text-primary); border: 1px solid var(--border);">
+                    <span id="text-run-sheets">☁️ Sync to Google Sheets</span>
+                </button>
+            </div>
+        </section>
+
         <section class="charts-grid">
             <div class="chart-card">
                 <div class="chart-title">Funding Rounds Distribution</div>
@@ -171,6 +195,7 @@
                             <th>Amount</th>
                             <th>Investors</th>
                             <th>Industry</th>
+                            <th>HQ</th>
                             <th>Confidence</th>
                             <th>Verification</th>
                             <th>Source</th>
@@ -189,7 +214,6 @@
                 </div>
             </div>
         </section>
-    </main>
 
         <!-- ========== SHARK TANK INDIA SECTION ========== -->
         <section id="shark-tank-section" class="section-card" style="display:none;margin-top:2rem;">
@@ -229,6 +253,7 @@
                     <option value="2">Season 2</option>
                     <option value="3">Season 3</option>
                     <option value="4">Season 4</option>
+                    <option value="5">Season 5</option>
                 </select>
                 <select id="st-shark-filter" class="filter-select">
                     <option value="">All Sharks</option>
@@ -242,6 +267,14 @@
                     <option value="Amit Jain">Amit Jain</option>
                     <option value="Radhika Gupta">Radhika Gupta</option>
                     <option value="Kunal Bahl">Kunal Bahl</option>
+                    <option value="Ritesh Agarwal">Ritesh Agarwal</option>
+                    <option value="Mohit Yadav">Mohit Yadav</option>
+                    <option value="Varun Alagh">Varun Alagh</option>
+                    <option value="Viraj Bahl">Viraj Bahl</option>
+                    <option value="Kanika Tekriwal">Kanika Tekriwal</option>
+                    <option value="Shaily Mehrotra">Shaily Mehrotra</option>
+                    <option value="Hardik Kothiya">Hardik Kothiya</option>
+                    <option value="Pratham Mittal">Pratham Mittal</option>
                 </select>
                 <select id="st-deal-filter" class="filter-select">
                     <option value="">All Outcomes</option>
@@ -277,6 +310,26 @@
                 </div>
             </div>
         </section>
+
+        <!-- RAG AI Q&A Section -->
+        <section id="rag-section" class="table-section hidden">
+            <div class="table-header">
+                <h2>🤖 AI Semantic Research Assistant (RAG)</h2>
+                <span class="subtitle">Ask any question to search database records using vector embeddings & Gemini.</span>
+            </div>
+
+            <div class="rag-box" style="margin: 20px 0; background: #1e293b; padding: 20px; border-radius: 12px; border: 1px solid #334155;">
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <input type="text" id="rag-input" placeholder="e.g. Which AI startups in Bangalore raised seed funding?" style="flex: 1; padding: 12px 16px; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: white; font-size: 15px;" />
+                    <button id="rag-ask-btn" class="action-btn" style="padding: 12px 24px;">Ask AI</button>
+                </div>
+
+                <div id="rag-output-box" style="display: none; background: #0f172a; padding: 20px; border-radius: 8px; border: 1px solid #334155; line-height: 1.6; font-size: 15px;">
+                    <div id="rag-output-content"></div>
+                </div>
+            </div>
+        </section>
+
     </main>
 
     <script src="app.js"></script>

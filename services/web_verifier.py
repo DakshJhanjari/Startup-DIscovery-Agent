@@ -24,6 +24,25 @@ class WebVerifierService:
         Searches the web for supporting evidence of a startup's funding.
         Validates findings using the LLM and adjusts the confidence score.
         """
+        from db.connection import get_db
+        from db.models import ResearchCache
+        import datetime
+
+        # Check Cache
+        try:
+            with get_db() as db:
+                cached_entry = db.query(ResearchCache).filter(
+                    ResearchCache.startup_name == startup_name,
+                    ResearchCache.service_type == 'web_verification'
+                ).first()
+                if cached_entry:
+                    age = datetime.datetime.utcnow() - cached_entry.updated_at
+                    if age.days < 7:
+                        logger.info(f"Using cached web verification for {startup_name}")
+                        return VerificationResult(**cached_entry.cached_json)
+        except Exception as e:
+            logger.warning(f"Failed to query ResearchCache for {startup_name}: {e}")
+
         # Formulate query with India focus
         query_terms = [startup_name, "funding India"]
         if round_name and round_name.lower() != "unknown":
@@ -77,9 +96,9 @@ class WebVerifierService:
 
         try:
             if self.gemini_key:
-                return self._verify_via_gemini(prompt)
+                res = self._verify_via_gemini(prompt)
             elif self.openai_key:
-                return self._verify_via_openai(prompt)
+                res = self._verify_via_openai(prompt)
             else:
                 return VerificationResult(
                     is_verified=False,
@@ -87,6 +106,29 @@ class WebVerifierService:
                     verification_sources=[],
                     summary="No LLM keys found to perform verification consensus."
                 )
+                
+            # Write to Cache
+            try:
+                with get_db() as db:
+                    cached_entry = db.query(ResearchCache).filter(
+                        ResearchCache.startup_name == startup_name,
+                        ResearchCache.service_type == 'web_verification'
+                    ).first()
+                    if cached_entry:
+                        cached_entry.cached_json = res.model_dump()
+                        cached_entry.updated_at = datetime.datetime.utcnow()
+                    else:
+                        new_cache = ResearchCache(
+                            startup_name=startup_name,
+                            service_type='web_verification',
+                            cached_json=res.model_dump()
+                        )
+                        db.add(new_cache)
+                    db.commit()
+            except Exception as cache_err:
+                logger.warning(f"Failed to write ResearchCache for {startup_name}: {cache_err}")
+                
+            return res
         except Exception as e:
             logger.error(f"LLM verification consensus execution failed: {e}")
             return VerificationResult(

@@ -7,6 +7,20 @@ import yt_dlp
 
 logger = logging.getLogger(__name__)
 
+# Trigger phrases that signal the start of the on-screen funding segment
+_FUNDING_TRIGGER_PHRASES = [
+    "funding segment",
+    "startups raised a total",
+    "this week indian startups raised",
+    "moving on to funding",
+    "let's go to the funding",
+    "now let's go to funding",
+    "let's talk about the startups",
+    "raised a combined",
+    "indian startups raised",
+    "total funding this week",
+]
+
 class TranscriptionService:
     def __init__(self):
         self.gemini_key = os.getenv("GEMINI_API_KEY")
@@ -44,6 +58,31 @@ class TranscriptionService:
     def get_full_text(self, transcript: List[Dict[str, Any]]) -> str:
         """Converts the list of transcript segments into a continuous string."""
         return " ".join([seg['text'] for seg in transcript])
+
+    def find_funding_segment_timestamp(self, transcript: List[Dict[str, Any]]) -> Optional[float]:
+        """
+        Scans the transcript segments for the host's funding segment trigger
+        phrase (e.g. 'this week Indian startups raised a total of X').
+
+        Returns the `start` time in seconds of the matching segment,
+        or None if no trigger phrase is detected.
+        """
+        if not transcript:
+            return None
+
+        for seg in transcript:
+            text_lower = seg.get("text", "").lower()
+            for phrase in _FUNDING_TRIGGER_PHRASES:
+                if phrase in text_lower:
+                    ts = float(seg["start"])
+                    logger.info(
+                        f"[Transcription] Funding segment trigger detected: "
+                        f"'{phrase}' at {ts:.1f}s"
+                    )
+                    return ts
+
+        logger.info("[Transcription] No funding segment trigger phrase found in transcript.")
+        return None
 
     def generate_transcript_fallback(self, video_id: str) -> Optional[str]:
         """

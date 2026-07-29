@@ -20,13 +20,20 @@ class PipelineScheduler:
             logger.error(f"Invalid DAILY_RUN_TIME configuration: '{self.daily_time}'. Defaulting to 02:00.")
             hour, minute = 2, 0
 
-        logger.info(f"Scheduling discovery pipeline to run daily at {hour:02d}:{minute:02d}")
+        try:
+            import zoneinfo
+            ist_tz = zoneinfo.ZoneInfo("Asia/Kolkata")
+        except Exception:
+            ist_tz = None
+
+        logger.info(f"Scheduling discovery pipeline to run daily at {hour:02d}:{minute:02d} IST")
         
         self.scheduler.add_job(
             func=self.runner.run,
             trigger="cron",
             hour=hour,
             minute=minute,
+            timezone=ist_tz,
             id="daily_startup_discovery_job",
             replace_existing=True
         )

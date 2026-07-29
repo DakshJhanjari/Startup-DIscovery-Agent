@@ -21,7 +21,12 @@ dependencies = [
     "google-auth>=2.27.0",
     "requests>=2.31.0",
     "pydub>=0.25.1",
-    "jinja2>=3.1.0"
+    "jinja2>=3.1.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.0.0",
+    "feedparser>=6.0.0",
+    "primp>=1.1.0",
+    "chromadb>=0.4.24"
 ]
 
 [build-system]

@@ -35,6 +35,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
     runBtn.addEventListener("click", triggerPipelineRun);
 
+    const runLeadsBtn = document.getElementById("btn-run-leads");
+    const runReportBtn = document.getElementById("btn-run-report");
+    const runSheetsBtn = document.getElementById("btn-run-sheets");
+
+    if (runLeadsBtn) runLeadsBtn.addEventListener("click", () => triggerModularPipeline("/api/run-leads", runLeadsBtn, "text-run-leads", "👔 Find LinkedIn Leads"));
+    if (runReportBtn) runReportBtn.addEventListener("click", () => triggerModularPipeline("/api/run-report", runReportBtn, "text-run-report", "📊 Generate Daily Report"));
+    if (runSheetsBtn) runSheetsBtn.addEventListener("click", () => triggerModularPipeline("/api/run-sheets", runSheetsBtn, "text-run-sheets", "☁️ Sync to Google Sheets"));
+
     // Nav: Shark Tank tab
     document.getElementById("nav-sharktank").addEventListener("click", (e) => {
         e.preventDefault();
@@ -62,10 +70,65 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
-    document.getElementById("nav-startups").addEventListener("click", (e) => {
+    document.getElementById("nav-rag").addEventListener("click", (e) => {
         e.preventDefault();
-        document.getElementById("startups-section").scrollIntoView({ behavior: 'smooth' });
+        activeTab = "rag";
+        document.querySelectorAll(".nav-item").forEach(li => li.classList.remove("active"));
+        e.currentTarget.closest(".nav-item").classList.add("active");
+        document.getElementById("shark-tank-section").style.display = "none";
+        document.getElementById("startups-section").style.display = "none";
+        document.getElementById("rag-section").classList.remove("hidden");
+        document.getElementById("rag-section").style.display = "block";
+        document.querySelectorAll(".charts-grid, .metrics-grid").forEach(el => {
+            el.style.display = "none";
+        });
     });
+
+    const ragAskBtn = document.getElementById("rag-ask-btn");
+    const ragInput = document.getElementById("rag-input");
+    const ragOutputBox = document.getElementById("rag-output-box");
+    const ragOutputContent = document.getElementById("rag-output-content");
+
+    if (ragAskBtn && ragInput) {
+        const handleRagAsk = async () => {
+            const query = ragInput.value.trim();
+            if (!query) return;
+
+            ragAskBtn.disabled = true;
+            ragAskBtn.textContent = "Searching...";
+            ragOutputBox.style.display = "block";
+            ragOutputContent.innerHTML = "<p>⏳ <i>Searching startup database via RAG vector similarity...</i></p>";
+
+            try {
+                const res = await fetch("/api/rag/ask", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ query })
+                });
+                const data = await res.json();
+                if (data.status === "success") {
+                    // Simple Markdown-like formatting for output
+                    let formatted = data.answer
+                        .replace(/\n/g, "<br>")
+                        .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+                        .replace(/\*(.*?)\*/g, "<em>$1</em>");
+                    ragOutputContent.innerHTML = formatted;
+                } else {
+                    ragOutputContent.innerHTML = `<p style="color: #ef4444;">⚠️ Error: ${data.detail || "RAG search failed."}</p>`;
+                }
+            } catch (err) {
+                ragOutputContent.innerHTML = `<p style="color: #ef4444;">⚠️ Connection error: ${err.message}</p>`;
+            } finally {
+                ragAskBtn.disabled = false;
+                ragAskBtn.textContent = "Ask AI";
+            }
+        };
+
+        ragAskBtn.addEventListener("click", handleRagAsk);
+        ragInput.addEventListener("keypress", (e) => {
+            if (e.key === "Enter") handleRagAsk();
+        });
+    }
 
     searchInput.addEventListener("input", debounce(() => {
         currentSearch = searchInput.value;
@@ -223,6 +286,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 industryCell.textContent = s.industry || "General";
                 tr.appendChild(industryCell);
                 
+                const hqCell = document.createElement("td");
+                hqCell.textContent = s.hq || "-";
+                tr.appendChild(hqCell);
+                
                 const confidenceCell = document.createElement("td");
                 const confVal = s.confidence_score || 0.0;
                 const confPercent = Math.round(confVal * 100);
@@ -256,12 +323,18 @@ document.addEventListener("DOMContentLoaded", () => {
                 
                 const sourceCell = document.createElement("td");
                 const src = s.source || "youtube";
-                const srcLabel = src === "inc42" ? `<span style="background:rgba(234,88,12,0.2);color:#fb923c;padding:2px 8px;border-radius:20px;font-size:0.75rem;">Inc42</span>`
-                    : `<a href="${s.source_video_url}" target="_blank" class="video-link-icon">
+                let srcLabel = "";
+                if (src === "inc42") {
+                    srcLabel = `<span style="background:rgba(234,88,12,0.2);color:#fb923c;padding:2px 8px;border-radius:20px;font-size:0.75rem;">Inc42</span>`;
+                } else if (src === "vision") {
+                    srcLabel = `<span style="background:rgba(139,92,246,0.2);color:#a78bfa;padding:2px 8px;border-radius:20px;font-size:0.75rem;">👁️ Vision</span>`;
+                } else {
+                    srcLabel = `<a href="${s.source_video_url}" target="_blank" class="video-link-icon">
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
                             <path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/>
                         </svg>
                     </a>`;
+                }
                 sourceCell.innerHTML = srcLabel;
                 tr.appendChild(sourceCell);
 
@@ -363,6 +436,27 @@ document.addEventListener("DOMContentLoaded", () => {
             console.error("Error triggering run:", error);
             runBtn.disabled = false;
             runBtn.innerHTML = `Run Discovery Now`;
+        }
+    }
+
+    async function triggerModularPipeline(endpoint, btnEl, textId, originalText) {
+        try {
+            btnEl.disabled = true;
+            document.getElementById(textId).innerHTML = `<span class="spinner" style="border-width: 2px; width: 12px; height: 12px; margin-right: 5px; display: inline-block;"></span> Working...`;
+            
+            const response = await fetch(endpoint, { method: "POST" });
+            const data = await response.json();
+            
+            console.log(`Triggered ${endpoint}:`, data.message);
+            alert(data.message);
+        } catch (error) {
+            console.error(`Error triggering ${endpoint}:`, error);
+            alert(`Error triggering pipeline step. Check console.`);
+        } finally {
+            setTimeout(() => {
+                btnEl.disabled = false;
+                document.getElementById(textId).innerHTML = originalText;
+            }, 3000);
         }
     }
 

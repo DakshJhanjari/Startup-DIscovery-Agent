@@ -27,3 +27,9 @@ Thumbs.db
 # Google Service Account credentials (NEVER commit)
 credentials.json
 credentials.json.json
+key.pem
+archive.zip
+*.pdf
+ffmpeg/
+scratch/
+chroma_db/
