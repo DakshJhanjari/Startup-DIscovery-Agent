@@ -64,7 +64,8 @@ def import_startups_from_sheet():
 
     with get_db() as db:
         for row in records:
-            name = str(row.get("Startup Name", "")).strip()
+            # Sheet column is "Name" (not "Startup Name")
+            name = str(row.get("Name", "") or row.get("Startup Name", "")).strip()
             if not name:
                 continue
 
@@ -77,35 +78,45 @@ def import_startups_from_sheet():
                 continue
 
             # Parse investors string back to list
+            # Sheet column is "Investors"
             investors_raw = str(row.get("Investors", ""))
             investors = [i.strip() for i in investors_raw.split(",") if i.strip()]
 
-            # Parse verification sources
-            sources_raw = str(row.get("Verification Sources", ""))
-            sources = [s.strip() for s in sources_raw.split(",") if s.strip()]
+            # Verification sources — collect any column that looks like a URL (columns K onwards)
+            sources = [str(v).strip() for k, v in row.items()
+                       if str(v).startswith("http") and k not in ("Website", "Link to youtube")]
 
-            # Parse confidence score
+            # Parse confidence score — sheet column is "Confidence Score"
             try:
-                confidence = float(row.get("Confidence Score", 0.0))
+                confidence = float(row.get("Confidence Score", 0.0) or 0.0)
             except (ValueError, TypeError):
                 confidence = 0.0
 
-            # Parse funding amount numeric value
-            funding_str = str(row.get("Funding Amount", ""))
+            # Sheet column is "Funding" (not "Funding Amount")
+            funding_str = str(row.get("Funding", "") or row.get("Funding Amount", ""))
             try:
                 numeric = float(''.join(c for c in funding_str if c.isdigit() or c == '.'))
             except ValueError:
                 numeric = None
+
+            # Sheet column is "Round" (not "Funding Round")
+            funding_round = str(row.get("Round", "") or row.get("Funding Round", "")) or None
+
+            # Sheet column is "Link to youtube" (not "Source Video URL")
+            source_url = str(row.get("Link to youtube", "") or row.get("Source Video URL", "")) or None
+
+            # Sheet column is "Date" (not "Upload Date")
+            timestamp_str = str(row.get("Timestamp", "") or row.get("Date", "")) or None
 
             startup = Startup(
                 name                 = name,
                 website              = str(row.get("Website", "")) or None,
                 funding_amount       = funding_str or None,
                 funding_amount_numeric = numeric,
-                funding_round        = str(row.get("Funding Round", "")) or None,
+                funding_round        = funding_round,
                 investors            = json.dumps(investors),
                 industry             = str(row.get("Industry", "")) or None,
-                source_video_url     = str(row.get("Source Video URL", "")) or None,
+                source_video_url     = source_url,
                 confidence_score     = confidence,
                 verification_sources = json.dumps(sources),
                 discovered_at        = datetime.utcnow(),
