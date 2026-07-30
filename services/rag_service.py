@@ -139,19 +139,32 @@ class RAGService:
                 return len(ids)
         return 0
 
+    def _get_sqlite_startup_count(self) -> int:
+        """Returns the current number of startups in SQLite."""
+        try:
+            with SessionLocal() as db:
+                return db.query(Startup).count()
+        except Exception:
+            return 0
+
     def query_similar_startups(self, query_text: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """Perform vector similarity search in ChromaDB using Gemini API embedding."""
         if not self.startups_collection:
             logger.warning("[RAG] ChromaDB startups_collection is not initialized.")
             return []
 
-        if self.startups_collection.count() == 0:
+        chroma_count = self.startups_collection.count()
+        sqlite_count = self._get_sqlite_startup_count()
+
+        # Re-index if ChromaDB is empty OR if SQLite has more startups than ChromaDB
+        if chroma_count == 0 or sqlite_count > chroma_count:
+            logger.info(f"[RAG] Re-indexing: ChromaDB has {chroma_count}, SQLite has {sqlite_count} startups.")
             self.index_all()
 
         emb = self._get_embedding(query_text)
         results = self.startups_collection.query(
             query_embeddings=[emb],
-            n_results=top_k
+            n_results=min(top_k, self.startups_collection.count())
         )
 
         output = []
