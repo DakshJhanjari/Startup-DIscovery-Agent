@@ -3,6 +3,7 @@ import logging
 import time
 from apscheduler.schedulers.background import BackgroundScheduler
 from pipeline import PipelineRunner
+from internship_pipeline import run_internship_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +12,7 @@ class PipelineScheduler:
         self.scheduler = BackgroundScheduler()
         self.runner = PipelineRunner()
         self.daily_time = os.getenv("DAILY_RUN_TIME", "02:00")
+        self.internship_time = os.getenv("INTERNSHIP_RUN_TIME", "09:30")
 
     def start(self):
         """Starts the background scheduler."""
@@ -38,6 +40,25 @@ class PipelineScheduler:
             replace_existing=True
         )
         
+        # Schedule internship report job at 9:30 AM IST daily
+        try:
+            int_hour, int_minute = map(int, self.internship_time.split(":"))
+        except ValueError:
+            logger.error(f"Invalid INTERNSHIP_RUN_TIME: '{self.internship_time}'. Defaulting to 09:30.")
+            int_hour, int_minute = 9, 30
+
+        logger.info(f"Scheduling internship pipeline to run daily at {int_hour:02d}:{int_minute:02d} IST")
+
+        self.scheduler.add_job(
+            func=run_internship_pipeline,
+            trigger="cron",
+            hour=int_hour,
+            minute=int_minute,
+            timezone=ist_tz,
+            id="daily_internship_report_job",
+            replace_existing=True
+        )
+
         self.scheduler.start()
         logger.info("Background scheduler started successfully.")
 
