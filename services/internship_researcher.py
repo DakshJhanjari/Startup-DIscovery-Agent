@@ -22,7 +22,7 @@ class InternshipResearcher:
         self.webhook_url = os.getenv("TELEGRAM_WEBHOOK_URL")
         self.gemini_key = os.getenv("GEMINI_API_KEY")
         self.client = genai.Client(api_key=self.gemini_key)
-        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
         
         # Resolve Bot Token
         self.bot_token = os.getenv("TELEGRAM_BOT_TOKEN")

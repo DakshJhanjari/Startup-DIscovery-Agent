@@ -126,7 +126,7 @@ class LinkedInFinderService:
 
     def __init__(self):
         self.gemini_key = os.getenv("GEMINI_API_KEY")
-        self.gemini_model = os.getenv("LEAD_FINDER_MODEL", "gemini-2.5-flash")
+        self.gemini_model = os.getenv("LEAD_FINDER_MODEL", "gemini-2.0-flash")
         # Seconds to wait between DuckDuckGo queries to avoid rate limits
         self.delay_seconds = float(os.getenv("LEAD_FINDER_DELAY_SECONDS", "3"))
         # Comma-separated override of roles to search (optional)
