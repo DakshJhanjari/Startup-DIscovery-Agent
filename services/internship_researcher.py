@@ -65,20 +65,39 @@ class InternshipResearcher:
             f"Ensure the results specifically talk about '{startup_name}' and not a different company with a similar name."
         )
         
-        try:
-            grounded_response = self.client.models.generate_content(
-                model=self.gemini_model,
-                contents=prompt_search,
-                config=types.GenerateContentConfig(
-                    tools=[{"google_search": {}}]
+        # Step 1: Search & Grounding (Gemini primary, DuckDuckGo fallback)
+        raw_research_text = None
+        if self.gemini_key:
+            try:
+                grounded_response = self.client.models.generate_content(
+                    model=self.gemini_model,
+                    contents=prompt_search,
+                    config=types.GenerateContentConfig(
+                        tools=[{"google_search": {}}]
+                    )
                 )
-            )
-            raw_research_text = grounded_response.text
-            if not raw_research_text:
-                logger.warning(f"No research text returned for {startup_name}")
-                return None
-        except Exception as e:
-            logger.error(f"Grounded search failed for {startup_name}: {e}")
+                raw_research_text = grounded_response.text
+            except Exception as e:
+                logger.warning(f"Gemini Grounded search failed for {startup_name}: {e}. Falling back to DuckDuckGo search...")
+
+        # Fallback to DuckDuckGo Search if Gemini Grounding failed or rate limited
+        if not raw_research_text:
+            try:
+                from duckduckgo_search import DDGS
+                ddg_query = f"{startup_name} startup India funding company profile"
+                snippets = []
+                with DDGS() as ddgs:
+                    results = ddgs.text(ddg_query, max_results=5)
+                    for r in results:
+                        snippets.append(f"Title: {r.get('title', '')}\nSnippet: {r.get('body', '')}\nURL: {r.get('href', '')}")
+                if snippets:
+                    raw_research_text = "\n\n".join(snippets)
+                    logger.info(f"Successfully retrieved DuckDuckGo web snippets for {startup_name}")
+            except Exception as ddg_err:
+                logger.error(f"DuckDuckGo fallback search failed for {startup_name}: {ddg_err}")
+
+        if not raw_research_text:
+            logger.warning(f"No research text returned for {startup_name}")
             return None
         # Step 2: Build prompt for JSON structuring
         prompt_structure = (
