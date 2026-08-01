@@ -80,30 +80,44 @@ class InternshipResearcher:
         except Exception as e:
             logger.error(f"Grounded search failed for {startup_name}: {e}")
             return None
- 
-        # Step 2: JSON Structuring and Fit Analysis
+        # Step 2: Build prompt for JSON structuring
         prompt_structure = (
             f"You are a career strategy assistant. Based on this research data, fill in the structured schema for the startup: '{startup_name}'.\n\n"
-            f"CRITICAL RULE: The research data MUST pertain to the startup '{startup_name}'. If the research data is about a different company with a similar name, or if no clear information about '{startup_name}' is found, do NOT use information of other companies. Instead, set 'mission' to 'No verified information found for {startup_name}' and all other fields to 'N/A'.\n\n"
+            f"CRITICAL RULE: The research data MUST pertain to '{startup_name}'. If it is about a different company, set 'mission' to 'No verified information found for {startup_name}' and all other fields to 'N/A'.\n\n"
             f"Research Data:\n{raw_research_text}\n\n"
             f"Recent Funding: {funding_amount} ({funding_round})\n\n"
             "Analyze how this startup fits internships in: "
-            "Product Management & Strategy (pm_fit), AI Automation (ai_fit), or Founder's Office (fo_fit) roles. "
-            "Consider their funding (e.g. if they raised a seed round, Founder's Office interns can wear many hats; if they raised Series A, PMs can help scale features)."
+            "Product Management & Strategy (pm_fit), AI Automation (ai_fit), or Founder's Office (fo_fit) roles."
         )
- 
+
+        # Step 2: JSON Structuring via Groq (primary) or Gemini (fallback)
         try:
-            structured_response = self.client.models.generate_content(
-                model=self.gemini_model,
-                contents=prompt_structure,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=ResearchAnalysis
+            groq_key = os.getenv("GROQ_API_KEY")
+            if groq_key:
+                from services.llm_client import LLMClient
+                llm = LLMClient()
+                analysis = llm.generate_json(
+                    prompt=prompt_structure,
+                    response_model=ResearchAnalysis,
+                    system="You are a career strategy assistant that structures startup research into internship fit analysis.",
                 )
-            )
-            data = json.loads(structured_response.text)
-            analysis = ResearchAnalysis(**data)
-            
+            else:
+                # Gemini fallback for JSON structuring
+                structured_response = self.client.models.generate_content(
+                    model=self.gemini_model,
+                    contents=prompt_structure,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=ResearchAnalysis
+                    )
+                )
+                data = json.loads(structured_response.text)
+                analysis = ResearchAnalysis(**data)
+
+            if not analysis:
+                logger.warning(f"No analysis generated for {startup_name}")
+                return None
+
             # Write to Cache
             try:
                 with get_db() as db:
@@ -112,23 +126,24 @@ class InternshipResearcher:
                         ResearchCache.service_type == 'internship_research'
                     ).first()
                     if cached_entry:
-                        cached_entry.cached_json = data
+                        cached_entry.cached_json = analysis.model_dump()
                         cached_entry.updated_at = datetime.datetime.utcnow()
                     else:
                         new_cache = ResearchCache(
                             startup_name=startup_name,
                             service_type='internship_research',
-                            cached_json=data
+                            cached_json=analysis.model_dump()
                         )
                         db.add(new_cache)
                     db.commit()
             except Exception as cache_err:
                 logger.warning(f"Failed to write ResearchCache for {startup_name}: {cache_err}")
-                
+
             return analysis
         except Exception as e:
             logger.error(f"Failed to structure research for {startup_name}: {e}")
             return None
+
 
     def send_telegram_report(self, report_md: str, chat_id: Optional[int] = None) -> bool:
         """

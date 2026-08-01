@@ -24,6 +24,7 @@ class FundingExtractionResult(BaseModel):
 
 class LLMExtractorService:
     def __init__(self):
+        self.groq_key = os.getenv("GROQ_API_KEY")
         self.gemini_key = os.getenv("GEMINI_API_KEY")
         self.openai_key = os.getenv("OPENAI_API_KEY")
         self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
@@ -87,18 +88,21 @@ class LLMExtractorService:
             f"--- START TRANSCRIPT ---\n{condensed_text}\n--- END TRANSCRIPT ---"
         )
 
+        # Groq is primary (14,400 RPD free tier)
+        if self.groq_key:
+            try:
+                return self._extract_via_groq(prompt)
+            except Exception as e:
+                logger.warning(f"Groq extraction failed: {e}. Trying Gemini fallback...")
+        # Gemini fallback (Google Search Grounding available)
         if self.gemini_key:
             try:
                 return self._extract_via_gemini(prompt)
             except Exception as e:
-                logger.error(f"Gemini extraction failed: {e}. Trying OpenAI fallback...")
-                if self.openai_key:
-                    return self._extract_via_openai(prompt)
-                raise e
-        elif self.openai_key:
+                logger.error(f"Gemini extraction also failed: {e}. Trying OpenAI fallback...")
+        if self.openai_key:
             return self._extract_via_openai(prompt)
-        else:
-            raise Exception("No API key configured for Gemini or OpenAI. Cannot perform extraction.")
+        raise Exception("All LLM providers exhausted. Cannot perform extraction.")
 
     def scan_for_funding_keywords(self, text: str) -> bool:
         """
@@ -116,9 +120,21 @@ class LLMExtractorService:
         matches = sum(1 for kw in keywords if kw in text_lower)
         return matches >= 2
 
+    def _extract_via_groq(self, prompt: str) -> List[ExtractedStartup]:
+        """Call Groq API (primary) for startup extraction using llama-3.3-70b."""
+        logger.info("Extracting startups using Groq llama-3.3-70b structured outputs...")
+        from services.llm_client import LLMClient
+        client = LLMClient()
+        result = client.generate_json(
+            prompt=prompt,
+            response_model=FundingExtractionResult,
+            system="Extract Indian startup funding information precisely. Ensure numeric conversion from INR is correctly performed.",
+        )
+        return result.startups if result else []
+
     def _extract_via_gemini(self, prompt: str) -> List[ExtractedStartup]:
-        """Call Gemini API using the new google-genai client."""
-        logger.info("Extracting startups using Gemini 2.5 Flash structured outputs...")
+        """Call Gemini API (fallback) using the google-genai client."""
+        logger.info("Extracting startups using Gemini structured outputs (fallback)...")
         import time
         from google import genai
         from google.genai import types

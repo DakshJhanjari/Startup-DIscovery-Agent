@@ -16,6 +16,7 @@ class RAGService:
     """
     def __init__(self, db_path: str = "./chroma_db"):
         self.gemini_key = os.getenv("GEMINI_API_KEY")
+        self.groq_key = os.getenv("GROQ_API_KEY")
         self.gemini_model = os.getenv("RAG_LLM_MODEL", "gemini-2.0-flash")
         
         # Initialize persistent ChromaDB client without heavy ONNX local models
@@ -208,16 +209,28 @@ class RAGService:
             f"User Question: {query_text}"
         )
 
-        if not self.gemini_key:
-            return f"### Retrieved Context\n\n{context_str}"
+        # Groq primary for answer generation (14,400 RPD, no quota issues)
+        if self.groq_key:
+            try:
+                from services.llm_client import LLMClient
+                llm = LLMClient()
+                return llm.generate(
+                    prompt=prompt,
+                    system="You are an AI Product Manager and VC Research Assistant specializing in Indian startups. Answer using only the provided context.",
+                )
+            except Exception as e:
+                logger.warning(f"[RAG] Groq generation failed: {e}. Falling back to Gemini...")
 
-        try:
-            client = genai.Client(api_key=self.gemini_key)
-            response = client.models.generate_content(
-                model=self.gemini_model,
-                contents=prompt
-            )
-            return response.text
-        except Exception as e:
-            logger.error(f"[RAG] Gemini generation failed: {e}")
-            return f"### Retrieved Startup Information\n\n{context_str}"
+        # Gemini fallback for answer generation
+        if self.gemini_key:
+            try:
+                client = genai.Client(api_key=self.gemini_key)
+                response = client.models.generate_content(
+                    model=self.gemini_model,
+                    contents=prompt
+                )
+                return response.text
+            except Exception as e:
+                logger.error(f"[RAG] Gemini generation failed: {e}")
+
+        return f"### Retrieved Startup Information\n\n{context_str}"

@@ -15,9 +15,10 @@ class VerificationResult(BaseModel):
 
 class WebVerifierService:
     def __init__(self):
+        self.groq_key = os.getenv("GROQ_API_KEY")
         self.gemini_key = os.getenv("GEMINI_API_KEY")
         self.openai_key = os.getenv("OPENAI_API_KEY")
-        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
     def verify_startup_funding(self, startup_name: str, round_name: Optional[str], amount: Optional[str]) -> VerificationResult:
         """
@@ -95,7 +96,9 @@ class WebVerifierService:
         )
 
         try:
-            if self.gemini_key:
+            if self.groq_key:
+                res = self._verify_via_groq(prompt)
+            elif self.gemini_key:
                 res = self._verify_via_gemini(prompt)
             elif self.openai_key:
                 res = self._verify_via_openai(prompt)
@@ -138,7 +141,22 @@ class WebVerifierService:
                 summary=f"Consensus processing error: {e}"
             )
 
+    def _verify_via_groq(self, prompt: str) -> VerificationResult:
+        """Call Groq API (primary) for funding verification."""
+        logger.info("Verifying startup funding via Groq (primary)...")
+        from services.llm_client import LLMClient
+        client = LLMClient()
+        result = client.generate_json(
+            prompt=prompt,
+            response_model=VerificationResult,
+            system="Verify Indian startup funding events precisely based on search results.",
+        )
+        if result:
+            return result
+        return VerificationResult(is_verified=False, adjusted_confidence=0.5, verification_sources=[], summary="Groq parse failed")
+
     def _verify_via_gemini(self, prompt: str) -> VerificationResult:
+        """Call Gemini API (fallback) for funding verification."""
         import time
         from google import genai
         from google.genai import types
