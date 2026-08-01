@@ -57,14 +57,14 @@ class RAGService:
                         logger.warning(f"[RAG] Gemini embedding API call failed: {e}")
                         break
 
-        # Fallback deterministic vector (3072-dimensional to match gemini-embedding-001)
+        # Fallback deterministic vector (768-dimensional to match gemini-embedding-001)
         import hashlib
         h = hashlib.sha256(text.encode("utf-8")).digest()
         vector = []
-        for i in range(96):
+        for i in range(24):
             for byte in h:
                 vector.append(float(byte) / 255.0)
-        return vector[:3072]
+        return vector[:768]
 
     def index_all(self) -> int:
         """
@@ -154,43 +154,78 @@ class RAGService:
             logger.warning("[RAG] ChromaDB startups_collection is not initialized.")
             return []
 
-        chroma_count = self.startups_collection.count()
-        sqlite_count = self._get_sqlite_startup_count()
+        try:
+            emb = self._get_embedding(query_text)
+            results = self.startups_collection.query(
+                query_embeddings=[emb],
+                n_results=min(top_k, self.startups_collection.count())
+            )
 
-        # Re-index if ChromaDB is empty OR if SQLite has more startups than ChromaDB
-        if chroma_count == 0 or sqlite_count > chroma_count:
-            logger.info(f"[RAG] Re-indexing: ChromaDB has {chroma_count}, SQLite has {sqlite_count} startups.")
-            self.index_all()
+            output = []
+            if results and results.get("documents"):
+                docs = results["documents"][0]
+                metas = results["metadatas"][0]
+                distances = results.get("distances", [[]])[0]
 
-        emb = self._get_embedding(query_text)
-        results = self.startups_collection.query(
-            query_embeddings=[emb],
-            n_results=min(top_k, self.startups_collection.count())
-        )
+                for i in range(len(docs)):
+                    output.append({
+                        "document": docs[i],
+                        "metadata": metas[i],
+                        "score": round(1.0 - distances[i], 3) if i < len(distances) else 0.0
+                    })
+            if output:
+                return output
+        except Exception as e:
+            logger.warning(f"[RAG] Vector query failed: {e}. Falling back to SQLite search.")
 
+        # Fallback to direct SQLite search if vector search returns empty or fails
+        return self._search_sqlite_fallback(query_text, top_k=top_k)
+
+    def _search_sqlite_fallback(self, query_text: str, top_k: int = 10) -> List[Dict[str, Any]]:
+        """Fallback search querying SQLite directly using keywords."""
+        from sqlalchemy import or_
+        keywords = [w.strip() for w in query_text.split() if len(w.strip()) > 2]
         output = []
-        if results and results.get("documents"):
-            docs = results["documents"][0]
-            metas = results["metadatas"][0]
-            distances = results.get("distances", [[]])[0]
-
-            for i in range(len(docs)):
+        with SessionLocal() as db:
+            query = db.query(Startup)
+            if keywords:
+                filters = []
+                for kw in keywords[:3]:
+                    filters.append(Startup.name.ilike(f"%{kw}%"))
+                    filters.append(Startup.industry.ilike(f"%{kw}%"))
+                    filters.append(Startup.funding_round.ilike(f"%{kw}%"))
+                query = query.filter(or_(*filters))
+            
+            startups = query.limit(top_k).all()
+            for s in startups:
+                investors_str = ", ".join(s.investors) if isinstance(s.investors, list) else str(s.investors or "")
+                doc_text = (
+                    f"Startup Name: {s.name}\n"
+                    f"Industry: {s.industry or 'N/A'}\n"
+                    f"Funding Round: {s.funding_round or 'N/A'}\n"
+                    f"Funding Amount: {s.funding_amount or 'N/A'}\n"
+                    f"Investors: {investors_str}\n"
+                    f"Website: {s.website or 'N/A'}\n"
+                )
                 output.append({
-                    "document": docs[i],
-                    "metadata": metas[i],
-                    "score": round(1.0 - distances[i], 3) if i < len(distances) else 0.0
+                    "document": doc_text,
+                    "metadata": {"startup_id": s.id, "name": s.name or "", "industry": s.industry or ""},
+                    "score": 0.5
                 })
         return output
 
     def answer_question(self, query_text: str) -> str:
         """
         Executes full RAG workflow:
-          1. Vector search ChromaDB for top-5 matching startups.
+          1. Vector search ChromaDB for top-5 matching startups (with SQLite fallback).
           2. Constructs augmented prompt with contexts.
-          3. Generates grounded answer using Gemini 2.5 Flash.
+          3. Generates grounded answer using Groq llama-3.3-70b.
         """
         logger.info(f"[RAG] Processing question: '{query_text}'")
         retrieved = self.query_similar_startups(query_text, top_k=5)
+
+        if not retrieved:
+            retrieved = self._search_sqlite_fallback(query_text, top_k=5)
 
         if not retrieved:
             return "No matching startup data found in the knowledge base."
