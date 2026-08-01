@@ -97,8 +97,13 @@ class InternshipResearcher:
                 logger.error(f"DuckDuckGo fallback search failed for {startup_name}: {ddg_err}")
 
         if not raw_research_text:
-            logger.warning(f"No research text returned for {startup_name}")
-            return None
+            logger.info(f"Web search empty or timed out for '{startup_name}'. Using Groq internal knowledge base fallback...")
+            raw_research_text = (
+                f"Startup Name: {startup_name}\n"
+                f"Funding Round: {funding_round or 'Recently Funded'}\n"
+                f"Funding Amount: {funding_amount or 'Disclosed'}\n"
+                f"Note: Use your knowledge base to provide information about '{startup_name}'."
+            )
         # Step 2: Build prompt for JSON structuring
         prompt_structure = (
             f"You are a career strategy assistant. Based on this research data, fill in the structured schema for the startup: '{startup_name}'.\n\n"
