@@ -17,7 +17,7 @@ class WebVerifierService:
     def __init__(self):
         self.gemini_key = os.getenv("GEMINI_API_KEY")
         self.openai_key = os.getenv("OPENAI_API_KEY")
-        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
     def verify_startup_funding(self, startup_name: str, round_name: Optional[str], amount: Optional[str]) -> VerificationResult:
         """

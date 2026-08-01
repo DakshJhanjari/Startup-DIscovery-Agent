@@ -26,7 +26,7 @@ class LLMExtractorService:
     def __init__(self):
         self.gemini_key = os.getenv("GEMINI_API_KEY")
         self.openai_key = os.getenv("OPENAI_API_KEY")
-        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
     def _condense_transcript(self, text: str) -> str:
         """
