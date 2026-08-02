@@ -18,9 +18,19 @@ logger = logging.getLogger(__name__)
 
 init_db()
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(
     title="Startup Funding Discovery Dashboard",
     description="API and UI dashboard for exploring recently discovered startup funding rounds."
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 runner = PipelineRunner()
@@ -554,13 +564,21 @@ def run_sheets(background_tasks: BackgroundTasks):
 class RAGQueryRequest(BaseModel):
     query: str
 
+_rag_service_instance = None
+
+def get_rag_service():
+    global _rag_service_instance
+    if _rag_service_instance is None:
+        from services.rag_service import RAGService
+        _rag_service_instance = RAGService()
+    return _rag_service_instance
+
 @app.post("/api/rag/ask")
 def rag_ask(req: RAGQueryRequest):
     if not req.query or not req.query.strip():
         raise HTTPException(status_code=400, detail="Query string is required")
     try:
-        from services.rag_service import RAGService
-        rag = RAGService()
+        rag = get_rag_service()
         answer = rag.answer_question(req.query.strip())
         return {"status": "success", "answer": answer}
     except Exception as e:
