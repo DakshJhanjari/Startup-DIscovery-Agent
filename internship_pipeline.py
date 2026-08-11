@@ -78,10 +78,11 @@ def run_internship_pipeline():
         
         logger.info(f"Selected {len(selected_startups)} startups for deep research.")
         
-        # 4. Send header message to each active user
+        # 4. Send header message to each active user (deduplicated per user per date)
+        today_str = datetime.date.today().strftime('%Y-%m-%d')
         for user in subscribed_users:
             header = (
-                f"💼 *Daily Internship Research Report - {datetime.date.today().strftime('%Y-%m-%d')}*\n"
+                f"💼 *Daily Internship Research Report - {today_str}*\n"
                 f"Here are {len(selected_startups)} unresearched startups evaluated for your target roles today:"
             )
             researcher.send_telegram_report(header, chat_id=user.telegram_chat_id)
