@@ -22,7 +22,7 @@ class InternshipResearcher:
         self.webhook_url = os.getenv("TELEGRAM_WEBHOOK_URL")
         self.gemini_key = os.getenv("GEMINI_API_KEY")
         self.client = genai.Client(api_key=self.gemini_key)
-        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
         
         # Resolve Bot Token
         self.bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -106,10 +106,13 @@ class InternshipResearcher:
             )
         # Step 2: Build prompt for JSON structuring
         prompt_structure = (
-            f"You are a career strategy assistant. Based on this research data, fill in the structured schema for the startup: '{startup_name}'.\n\n"
-            f"CRITICAL RULE: The research data MUST pertain to '{startup_name}'. If it is about a different company, set 'mission' to 'No verified information found for {startup_name}' and all other fields to 'N/A'.\n\n"
-            f"Research Data:\n{raw_research_text}\n\n"
+            f"You are an expert venture capital research analyst. Fill in the structured analysis schema for the Indian startup: '{startup_name}'.\n\n"
             f"Recent Funding: {funding_amount} ({funding_round})\n\n"
+            f"Research Snippets:\n{raw_research_text}\n\n"
+            f"CRITICAL RULES:\n"
+            f"1. MISSION: Provide a clear, accurate 1-2 sentence mission statement defining what '{startup_name}' does, what core product/service they offer, what exact problem they solve, and their target customers.\n"
+            f"2. KNOWLEDGE BASE FALLBACK: If the research snippets above are concise, USE YOUR EXTENSIVE KNOWLEDGE BASE about '{startup_name}' and the Indian startup ecosystem to describe the company accurately.\n"
+            f"3. STRICT PROHIBITION: DO NOT output generic phrases like 'not specified in provided data' or 'mission is unknown'. Always provide an informative, factual description of '{startup_name}''s business model.\n\n"
             "Analyze how this startup fits internships in: "
             "Product Management & Strategy (pm_fit), AI Automation (ai_fit), or Founder's Office (fo_fit) roles."
         )
