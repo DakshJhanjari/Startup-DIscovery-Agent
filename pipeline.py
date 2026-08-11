@@ -33,8 +33,8 @@ class PipelineRunner:
         self.video_vision = VideoVisionService()
         self.inc42 = Inc42Scraper()
         self.shark_tank = SharkTankScraper()
-        # Minimum confidence score a startup needs to trigger lead finding
-        self.lead_min_confidence = float(os.getenv("LEAD_MIN_CONFIDENCE", "0.5"))
+        # Minimum confidence score a startup needs to trigger lead finding (0.0 = all startups)
+        self.lead_min_confidence = float(os.getenv("LEAD_MIN_CONFIDENCE", "0.0"))
         self.enable_lead_finder = os.getenv("ENABLE_LEAD_FINDER", "true").lower() == "true"
         
         keywords_str = os.getenv(
