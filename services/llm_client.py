@@ -16,7 +16,7 @@ class LLMClient:
 
     def __init__(self):
         self.groq_key = os.getenv("GROQ_API_KEY")
-        self.groq_model = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
+        self.groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 
     def _get_groq_client(self):
         from groq import Groq

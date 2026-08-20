@@ -17,7 +17,7 @@ class RAGService:
     def __init__(self, db_path: str = "./chroma_db"):
         self.gemini_key = os.getenv("GEMINI_API_KEY")
         self.groq_key = os.getenv("GROQ_API_KEY")
-        self.gemini_model = os.getenv("RAG_LLM_MODEL", "gemini-2.0-flash")
+        self.gemini_model = os.getenv("RAG_LLM_MODEL", "gemini-3.6-flash")
         
         # Initialize persistent ChromaDB client without heavy ONNX local models
         try:
