@@ -129,8 +129,8 @@ def run_internship_pipeline():
                 funding_amount=startup.funding_amount
             )
             
-            if not analysis or "no verified information" in analysis.mission.lower() or analysis.mission == "N/A":
-                logger.warning(f"Could not generate reliable verified research for {startup.name}. Skipping.")
+            if not analysis:
+                logger.warning(f"LLM call returned None for {startup.name}. Skipping this startup.")
                 continue
                 
             website_str = f" [Website]({startup.website})" if startup.website else ""
