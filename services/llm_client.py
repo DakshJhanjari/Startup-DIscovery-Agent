@@ -1,4 +1,4 @@
-﻿import os
+import os
 import json
 import logging
 from typing import Optional, Type
@@ -16,7 +16,7 @@ class LLMClient:
 
     def __init__(self):
         self.groq_key = os.getenv("GROQ_API_KEY")
-        self.groq_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+        self.groq_model = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
 
     def _get_groq_client(self):
         from groq import Groq

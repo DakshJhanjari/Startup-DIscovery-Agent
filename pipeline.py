@@ -109,7 +109,7 @@ class PipelineRunner:
                         source="inc42",
                         source_video_url=s_dict.get("source_url"),
                         timestamp=None,
-                        upload_date=datetime.datetime.utcnow().isoformat(),
+                        upload_date=s_dict.get("upload_date") or datetime.datetime.utcnow(),
                         confidence_score=final_confidence,
                         verification_sources=verification.verification_sources
                     )
