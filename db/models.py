@@ -126,6 +126,9 @@ class LeadProfile(Base):
     # Quality signals
     confidence_score = Column(Float, default=0.0)   # 0.0–1.0, LLM-assessed match quality
     source = Column(String(50), default="google_dork")  # "website_scrape" | "google_dork"
+    # A2A Email Drafting — tracks if a Gmail draft was created for this lead
+    email_drafted = Column(Boolean, default=False)
+    email_drafted_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     def to_dict(self):
@@ -138,6 +141,8 @@ class LeadProfile(Base):
             "linkedin_url": self.linkedin_url,
             "confidence_score": self.confidence_score,
             "source": self.source,
+            "email_drafted": self.email_drafted,
+            "email_drafted_at": self.email_drafted_at.isoformat() if self.email_drafted_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

@@ -15,6 +15,7 @@ from services.linkedin_finder import LinkedInFinderService
 from services.video_vision import VideoVisionService
 from services.inc42_scraper import Inc42Scraper
 from services.shark_tank_scraper import SharkTankScraper
+from services.a2a_client import A2AEmailDrafterClient
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -36,6 +37,7 @@ class PipelineRunner:
         # Minimum confidence score a startup needs to trigger lead finding (0.0 = all startups)
         self.lead_min_confidence = float(os.getenv("LEAD_MIN_CONFIDENCE", "0.0"))
         self.enable_lead_finder = os.getenv("ENABLE_LEAD_FINDER", "true").lower() == "true"
+        self.a2a_email_drafter = A2AEmailDrafterClient()
         
         keywords_str = os.getenv(
             "SEARCH_KEYWORDS", 
@@ -123,6 +125,9 @@ class PipelineRunner:
                     if self.enable_lead_finder and new_startup.confidence_score >= self.lead_min_confidence:
                         leads_found = self._find_and_save_leads(db, new_startup)
                         stats["leads_found"] += leads_found
+                        # --- A2A Email Drafting ---
+                        if leads_found > 0:
+                            self._draft_emails_via_a2a(db, new_startup)
         except Exception as e:
             logger.error(f"Inc42 scraper failed during pipeline execution: {e}")
 
@@ -338,6 +343,9 @@ class PipelineRunner:
                         if self.enable_lead_finder and new_startup.confidence_score >= self.lead_min_confidence:
                             leads_found = self._find_and_save_leads(db, new_startup)
                             stats["leads_found"] += leads_found
+                            # --- A2A Email Drafting ---
+                            if leads_found > 0:
+                                self._draft_emails_via_a2a(db, new_startup)
 
                     processed_video = ProcessedVideo(
                         video_id=video_id,
@@ -398,6 +406,43 @@ class PipelineRunner:
         stats["end_time"] = datetime.datetime.utcnow().isoformat()
         logger.info(f"Pipeline Run Completed! Stats: {stats}")
         return stats
+
+    def _draft_emails_via_a2a(self, db, startup: Startup) -> None:
+        """
+        For each LeadProfile saved for this startup that hasn't had an email
+        drafted yet, calls the Cold Email Drafter agent via A2A protocol and
+        marks the lead as email_drafted=True on success.
+        """
+        import datetime as dt
+        try:
+            leads = db.query(LeadProfile).filter(
+                LeadProfile.startup_id == startup.id,
+                LeadProfile.email_drafted == False
+            ).all()
+
+            if not leads:
+                logger.info(f"[A2A] No undrafted leads for {startup.name}. Skipping email drafting.")
+                return
+
+            logger.info(f"[A2A] Drafting emails for {len(leads)} lead(s) at {startup.name}...")
+            for lead in leads:
+                success = self.a2a_email_drafter.draft_email_for_lead(
+                    startup_name=startup.name,
+                    startup_mission="",           # internship_researcher handles mission; left blank here
+                    funding_round=startup.funding_round or "",
+                    funding_amount=startup.funding_amount or "",
+                    industry=startup.industry or "",
+                    founder_name=lead.name or "Founder",
+                    founder_role=lead.role or "Founder",
+                    linkedin_url=lead.linkedin_url or "",
+                    website=startup.website or "",
+                )
+                if success:
+                    lead.email_drafted = True
+                    lead.email_drafted_at = dt.datetime.utcnow()
+                    db.commit()
+        except Exception as e:
+            logger.error(f"[A2A] Email drafting failed for {startup.name}: {e}")
 
     def _find_and_save_leads(self, db, startup: Startup) -> int:
         """
