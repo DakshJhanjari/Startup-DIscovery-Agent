@@ -25,8 +25,24 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
-    """Initializes the database tables."""
+    """Initializes the database tables and runs lightweight column migrations."""
     Base.metadata.create_all(bind=engine)
+    
+    # Auto-migrate newly added columns for SQLite
+    if DATABASE_URL.startswith("sqlite"):
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            # Check lead_profiles columns
+            try:
+                result = conn.execute(text("PRAGMA table_info(lead_profiles)"))
+                columns = [row[1] for row in result.fetchall()]
+                if "email_drafted" not in columns:
+                    conn.execute(text("ALTER TABLE lead_profiles ADD COLUMN email_drafted BOOLEAN DEFAULT 0"))
+                if "email_drafted_at" not in columns:
+                    conn.execute(text("ALTER TABLE lead_profiles ADD COLUMN email_drafted_at DATETIME"))
+                conn.commit()
+            except Exception:
+                pass
 
 @contextmanager
 def get_db():
