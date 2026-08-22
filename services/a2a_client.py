@@ -21,7 +21,7 @@ class A2AEmailDrafterClient:
     def __init__(self):
         self.base_url = os.getenv("EMAIL_AGENT_URL", "").rstrip("/")
         self.enabled = os.getenv("ENABLE_EMAIL_DRAFTER", "false").lower() == "true"
-        self.timeout = 45
+        self.timeout = 90  # 90s to accommodate Render cold-starts + LLM drafting
         self._agent_card_cache = None
 
     def discover(self) -> bool:
@@ -30,7 +30,7 @@ class A2AEmailDrafterClient:
             logger.warning("[A2A] EMAIL_AGENT_URL not set.")
             return False
         try:
-            resp = requests.get(f"{self.base_url}/.well-known/agent.json", timeout=10)
+            resp = requests.get(f"{self.base_url}/.well-known/agent.json", timeout=60)
             resp.raise_for_status()
             card = resp.json()
             self._agent_card_cache = card
