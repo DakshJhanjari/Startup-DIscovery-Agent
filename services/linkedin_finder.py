@@ -132,6 +132,13 @@ class LinkedInFinderService:
         # Comma-separated override of roles to search (optional)
         roles_env = os.getenv("LEAD_FINDER_ROLES", "")
         self.roles = [r.strip() for r in roles_env.split(",") if r.strip()] or DEFAULT_ROLES
+        
+        # Groq primary client
+        try:
+            from services.llm_client import LLMClient
+            self.llm = LLMClient()
+        except Exception:
+            self.llm = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -476,6 +483,21 @@ class LinkedInFinderService:
             f"{json.dumps(combined_candidates, indent=2, ensure_ascii=False)}\n"
         )
 
+        # Step 1: Try Groq primary for batch structured validation
+        if self.llm and self.llm.groq_key:
+            try:
+                result = self.llm.generate_json(
+                    prompt=prompt,
+                    response_model=LeadExtractionResult,
+                    system="You are a precise recruitment researcher. Only validate leads clearly linked to the target startups."
+                )
+                if result and result.leads is not None:
+                    logger.info(f"[LeadFinder] Successfully validated {len(result.leads)} lead(s) across batch via Groq.")
+                    return result.leads
+            except Exception as groq_err:
+                logger.warning(f"[LeadFinder] Groq batch validation failed: {groq_err}. Trying Gemini fallback...")
+
+        # Step 2: Gemini fallback
         try:
             from google import genai
             from google.genai import types
@@ -573,6 +595,21 @@ class LinkedInFinderService:
             f"{json.dumps(candidates_to_validate, indent=2, ensure_ascii=False)}\n"
         )
 
+        # Step 1: Try Groq primary for structured validation
+        if self.llm and self.llm.groq_key:
+            try:
+                result = self.llm.generate_json(
+                    prompt=prompt,
+                    response_model=LeadExtractionResult,
+                    system="You are a precise recruitment researcher. Only validate leads that are clearly linked to the target startup."
+                )
+                if result and result.leads is not None:
+                    logger.info(f"[LeadFinder] Successfully validated {len(result.leads)} lead(s) for '{startup_name}' via Groq.")
+                    return result.leads
+            except Exception as groq_err:
+                logger.warning(f"[LeadFinder] Groq validation failed for '{startup_name}': {groq_err}. Trying Gemini fallback...")
+
+        # Step 2: Gemini fallback
         try:
             from google import genai
             from google.genai import types

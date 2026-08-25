@@ -453,7 +453,7 @@ def _bg_run_ask(chat_id: int, query: str):
         # Route to local FastAPI endpoint first to conserve process RAM (fast 3s timeout)
         answer = None
         try:
-            res = requests.post("http://127.0.0.1:8000/api/rag/ask", json={"query": query}, timeout=3)
+            res = requests.post("http://127.0.0.1:8000/api/rag/ask", json={"query": query}, timeout=45)
             if res.status_code == 200:
                 answer = res.json().get("answer")
         except Exception as http_err:

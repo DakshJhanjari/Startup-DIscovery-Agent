@@ -50,9 +50,16 @@ FUNDING_KEYWORDS = [
 class Inc42Scraper:
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY")
-        self.model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         self.lookback_hours = int(os.getenv("SEARCH_LOOKBACK_HOURS", "24"))
+        
+        # Groq primary client
+        try:
+            from services.llm_client import LLMClient
+            self.llm = LLMClient()
+        except Exception:
+            self.llm = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -180,6 +187,32 @@ Rules:
 - If multiple startups in article, extract the PRIMARY one
 - confidence_score: 0.9 if clear funding round + amount, 0.7 if partial info, 0.5 if inferred
 """
+        # Step 1: Try Groq primary for structured extraction
+        if self.llm and self.llm.groq_key:
+            try:
+                data = self.llm.generate_json(
+                    prompt=prompt,
+                    response_model=Inc42StartupInfo,
+                    system="You are an expert at extracting Indian startup funding data from news articles."
+                )
+                if data and data.startup_name:
+                    logger.info(f"[Inc42Scraper] Successfully extracted '{data.startup_name}' via Groq.")
+                    return {
+                        "name": data.startup_name,
+                        "funding_amount": data.funding_amount,
+                        "funding_amount_numeric": data.funding_amount_numeric,
+                        "funding_round": data.funding_round,
+                        "investors": data.investors or [],
+                        "industry": data.industry,
+                        "website": data.website,
+                        "confidence_score": float(data.confidence_score or 0.7),
+                        "verification_sources": [article["url"]],
+                        "upload_date": article.get("published"),
+                    }
+            except Exception as groq_err:
+                logger.warning(f"[Inc42Scraper] Groq extraction failed for '{title}': {groq_err}. Trying Gemini fallback...")
+
+        # Step 2: Gemini fallback
         try:
             if not self.client:
                 return None
