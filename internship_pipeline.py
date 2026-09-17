@@ -28,36 +28,36 @@ def is_valid_name(name: str) -> bool:
     return True
 
 
-def run_internship_pipeline():
+def run_internship_pipeline(force: bool = False):
     logger.info("Starting Internship Application Research Pipeline...")
     init_db()
 
+    # Check for CLI force flag
+    if "--force" in sys.argv:
+        force = True
+
     # ── Idempotency guard ──────────────────────────────────────────────────────
-    # If two processes both fire at 09:30 (e.g. systemd + orphan python process),
-    # only the FIRST one to write the lock entry will proceed.  The second one
-    # will see the existing entry and exit immediately, preventing duplicate msgs.
     today_key = datetime.date.today().isoformat()   # e.g. "2026-08-20"
     from db.models import ResearchCache
     with get_db() as lock_db:
-        existing = lock_db.query(ResearchCache).filter(
-            ResearchCache.startup_name == "__daily_report_lock__",
-            ResearchCache.service_type == today_key
-        ).first()
-        if existing:
-            logger.warning(
-                f"Idempotency guard: daily report for {today_key} was already dispatched "
-                f"(lock created at {existing.updated_at}). Skipping duplicate run."
-            )
-            return
-        # Claim the lock before doing any real work
-        lock_entry = ResearchCache(
-            startup_name="__daily_report_lock__",
-            service_type=today_key,
-            cached_json={"locked": True}
-        )
-        lock_db.add(lock_entry)
-        lock_db.commit()
-        logger.info(f"Idempotency lock acquired for {today_key}. Proceeding with pipeline.")
+        if force:
+            lock_db.query(ResearchCache).filter(
+                ResearchCache.startup_name == "__daily_report_lock__",
+                ResearchCache.service_type == today_key
+            ).delete()
+            lock_db.commit()
+            logger.info(f"Force flag detected: Cleared existing idempotency lock for {today_key}.")
+        else:
+            existing = lock_db.query(ResearchCache).filter(
+                ResearchCache.startup_name == "__daily_report_lock__",
+                ResearchCache.service_type == today_key
+            ).first()
+            if existing:
+                logger.warning(
+                    f"Idempotency guard: daily report for {today_key} was already dispatched "
+                    f"(lock created at {existing.updated_at}). Skipping duplicate run."
+                )
+                return
     # ──────────────────────────────────────────────────────────────────────────
 
     researcher = InternshipResearcher()
@@ -161,6 +161,18 @@ def run_internship_pipeline():
             # Mark as researched only after processing & dispatch completes
             startup.internship_researched = True
             db.commit()
+
+        # Claim lock for today only after at least one report or card was processed
+        if selected_startups:
+            with get_db() as lock_db:
+                lock_entry = ResearchCache(
+                    startup_name="__daily_report_lock__",
+                    service_type=today_key,
+                    cached_json={"locked": True}
+                )
+                lock_db.add(lock_entry)
+                lock_db.commit()
+                logger.info(f"Daily report lock claimed for {today_key} after successful dispatch.")
 
 if __name__ == "__main__":
     run_internship_pipeline()
