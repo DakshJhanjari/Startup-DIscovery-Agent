@@ -46,6 +46,8 @@ class Startup(Base):
     confidence_score = Column(Float, default=0.0) # Score out of 1.0
     verification_sources = Column(JSON, nullable=True) # List of verification URLs or sources
     hq = Column(String(100), nullable=True)  # Headquarters city (from vision OCR screen)
+    careers_url = Column(String(255), nullable=True)  # Direct ATS or career page link
+    ats_provider = Column(String(50), nullable=True)  # "ashby", "lever", "greenhouse", "workable", "custom"
     internship_researched = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
@@ -54,6 +56,8 @@ class Startup(Base):
             "id": self.id,
             "name": self.name,
             "website": self.website,
+            "careers_url": self.careers_url or "",
+            "ats_provider": self.ats_provider or "",
             "funding_amount": self.funding_amount,
             "funding_amount_numeric": self.funding_amount_numeric,
             "funding_round": self.funding_round,

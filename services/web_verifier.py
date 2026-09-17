@@ -55,23 +55,46 @@ class WebVerifierService:
         logger.info(f"Performing Indian search verification for query: '{query}'")
         
         snippets = []
+        # Priority 1: Serper.dev Google Search API
         try:
-            with DDGS() as ddgs:
-                results = ddgs.text(query, max_results=5)
-                for r in results:
+            from services.serper_client import SerperClient
+            serper = SerperClient()
+            if serper.is_available:
+                serper_results = serper.search(query, num_results=5)
+                for r in (serper_results or []):
                     snippets.append({
                         "title": r.get("title", ""),
-                        "href": r.get("href", ""),
-                        "body": r.get("body", "")
+                        "href": r.get("link", ""),
+                        "body": r.get("snippet", "")
                     })
-        except Exception as e:
-            logger.error(f"DuckDuckGo search failed: {e}")
-            return VerificationResult(
-                is_verified=False,
-                adjusted_confidence=0.3,
-                verification_sources=[],
-                summary=f"Web search failed: {e}"
-            )
+                if snippets:
+                    logger.info(f"Retrieved {len(snippets)} verification snippets via Serper Google Search for '{startup_name}'")
+        except Exception as serper_err:
+            logger.warning(f"Serper search verification failed for {startup_name}: {serper_err}. Falling back to DuckDuckGo...")
+
+        # Priority 2: DuckDuckGo fallback
+        if not snippets:
+            try:
+                try:
+                    from ddgs import DDGS
+                except ImportError:
+                    from duckduckgo_search import DDGS
+                with DDGS() as ddgs:
+                    results = ddgs.text(query, max_results=5)
+                    for r in results:
+                        snippets.append({
+                            "title": r.get("title", ""),
+                            "href": r.get("href", ""),
+                            "body": r.get("body", "")
+                        })
+            except Exception as e:
+                logger.error(f"DuckDuckGo search failed: {e}")
+                return VerificationResult(
+                    is_verified=False,
+                    adjusted_confidence=0.3,
+                    verification_sources=[],
+                    summary=f"Web search failed: {e}"
+                )
 
         if not snippets:
             logger.warning(f"No search results found for {startup_name}")

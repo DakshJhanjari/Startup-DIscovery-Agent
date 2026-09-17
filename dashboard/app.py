@@ -1,6 +1,7 @@
 import os
 import datetime
 import logging
+from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
@@ -584,6 +585,41 @@ def rag_ask(req: RAGQueryRequest):
     except Exception as e:
         logger.error(f"RAG endpoint failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ── Project Recommender & Resume Analyzer Endpoints ──────────────────────────
+class ResumeAnalysisRequest(BaseModel):
+    resume_text: str
+    target_track: Optional[str] = "ai"  # "pm", "ai", or "fo"
+
+_project_recommender = None
+
+def get_project_recommender():
+    global _project_recommender
+    if _project_recommender is None:
+        from services.project_recommender import ProjectRecommenderService
+        _project_recommender = ProjectRecommenderService()
+    return _project_recommender
+
+@app.get("/api/projects/recommended")
+def get_recommended_projects(track: Optional[str] = "all"):
+    """Returns curated industry-standard flagship projects filtered by role track."""
+    rec = get_project_recommender()
+    projects = rec.get_curated_projects(track)
+    return {"status": "success", "projects": projects}
+
+@app.post("/api/resume/analyze")
+def analyze_resume(req: ResumeAnalysisRequest):
+    """Evaluates student resume against seed/Series A startup expectations and returns skill gaps & match project."""
+    if not req.resume_text or len(req.resume_text.strip()) < 20:
+        raise HTTPException(status_code=400, detail="Please provide a valid resume text (at least 20 characters).")
+    try:
+        rec = get_project_recommender()
+        analysis = rec.analyze_resume_and_match(req.resume_text, target_track=req.target_track or "ai")
+        return {"status": "success", "analysis": analysis.model_dump()}
+    except Exception as e:
+        logger.error(f"Resume analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 # Mount static files last so specific API routes are not intercepted

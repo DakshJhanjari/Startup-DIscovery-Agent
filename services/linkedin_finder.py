@@ -409,8 +409,42 @@ class LinkedInFinderService:
         snippets: List[Dict[str, Any]] = []
         seen_urls: set = set()
 
-        # Build simple role phrase (max 3 roles space-separated — DDG natural language)
         role_phrase = " ".join(roles[:3])
+        
+        # Priority 1: Serper.dev real Google Search (supports site:linkedin.com/in)
+        try:
+            from services.serper_client import SerperClient
+            serper = SerperClient()
+            if serper.is_available:
+                serper_query = f"{startup_name} ({' OR '.join(roles[:3])}) site:linkedin.com/in"
+                serper_results = serper.search(serper_query, num_results=10)
+                for r in (serper_results or []):
+                    href = r.get("link", "")
+                    title = r.get("title", "")
+                    body = r.get("snippet", "")
+                    if "linkedin.com/in/" in href:
+                        clean = href.split("?")[0].rstrip("/")
+                        if clean not in seen_urls:
+                            seen_urls.add(clean)
+                            snippets.append({
+                                "source": "serper_google",
+                                "href": clean,
+                                "title": title,
+                                "body": body[:400],
+                            })
+                if snippets:
+                    logger.info(
+                        f"[LeadFinder] Serper Google dork [{roles[0]}] returned {len(snippets)} snippet(s) for '{startup_name}'"
+                    )
+                    return snippets[:8]
+        except Exception as serper_err:
+            logger.warning(f"[LeadFinder] Serper dork failed for '{startup_name}': {serper_err}. Falling back to DuckDuckGo...")
+
+        # Priority 2: DuckDuckGo Fallback
+        if not DDGS:
+            logger.warning("[LeadFinder] No DDG library available. Skipping search step.")
+            return []
+
         query = f"{startup_name} {role_phrase} linkedin India"
 
         try:

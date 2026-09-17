@@ -80,10 +80,31 @@ class InternshipResearcher:
             except Exception as e:
                 logger.warning(f"Gemini Grounded search failed for {startup_name}: {e}. Falling back to DuckDuckGo search...")
 
-        # Fallback to DuckDuckGo Search if Gemini Grounding failed or rate limited
+        # Fallback 1: Serper.dev Google Search API (Fast, comprehensive, no rate-limits)
         if not raw_research_text:
             try:
-                from duckduckgo_search import DDGS
+                from services.serper_client import SerperClient
+                serper = SerperClient()
+                if serper.is_available:
+                    serper_query = f"{startup_name} startup India funding company profile"
+                    serper_results = serper.search(serper_query, num_results=5)
+                    snippets = [
+                        f"Title: {r.get('title', '')}\nSnippet: {r.get('snippet', '')}\nURL: {r.get('link', '')}"
+                        for r in serper_results if r.get('snippet')
+                    ]
+                    if snippets:
+                        raw_research_text = "\n\n".join(snippets)
+                        logger.info(f"Successfully retrieved Serper Google snippets for {startup_name}")
+            except Exception as serper_err:
+                logger.warning(f"Serper search failed for {startup_name}: {serper_err}. Falling back to DuckDuckGo...")
+
+        # Fallback 2: DuckDuckGo Search if Serper unavailable or empty
+        if not raw_research_text:
+            try:
+                try:
+                    from ddgs import DDGS
+                except ImportError:
+                    from duckduckgo_search import DDGS
                 ddg_query = f"{startup_name} startup India funding company profile"
                 snippets = []
                 with DDGS() as ddgs:
@@ -175,31 +196,53 @@ class InternshipResearcher:
     def send_telegram_report(self, report_md: str, chat_id: Optional[int] = None) -> bool:
         """
         Sends the compiled markdown report to a specific Telegram chat_id or the default webhook.
+        Falls back to plain text if Telegram fails to parse markdown.
         """
         url = self.webhook_url
-        if chat_id and self.bot_token:
+        target_chat_id = chat_id
+        if not target_chat_id and url and "chat_id=" in url:
+            try:
+                import urllib.parse
+                parsed = urllib.parse.urlparse(url)
+                params = urllib.parse.parse_qs(parsed.query)
+                if "chat_id" in params:
+                    target_chat_id = int(params["chat_id"][0])
+            except Exception:
+                pass
+
+        if target_chat_id and self.bot_token:
             url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
 
         if not url:
             logger.warning("No destination URL resolved for Telegram delivery.")
             return False
 
-        logger.info(f"Sending Telegram report to: {url} (chat_id={chat_id})")
+        logger.info(f"Sending Telegram report to: {url} (chat_id={target_chat_id})")
         try:
             payload = {
                 "text": report_md,
                 "parse_mode": "Markdown"
             }
-            if chat_id and self.bot_token:
-                payload["chat_id"] = chat_id
-                
+            if target_chat_id:
+                payload["chat_id"] = target_chat_id
+
             response = requests.post(url, json=payload, timeout=15)
             if response.status_code in [200, 204]:
                 logger.info("Report sent successfully to Telegram.")
                 return True
             else:
-                logger.error(f"Telegram API failed with status: {response.status_code}, response: {response.text}")
-                return False
+                logger.warning(
+                    f"Telegram Markdown delivery failed (status {response.status_code}: {response.text}). "
+                    "Retrying delivery as plain text..."
+                )
+                payload.pop("parse_mode", None)
+                plain_res = requests.post(url, json=payload, timeout=15)
+                if plain_res.status_code in [200, 204]:
+                    logger.info("Report sent successfully to Telegram as plain text.")
+                    return True
+                else:
+                    logger.error(f"Telegram plain text delivery failed: {plain_res.status_code} - {plain_res.text}")
+                    return False
         except Exception as e:
             logger.error(f"Failed to deliver Telegram report: {e}")
             return False

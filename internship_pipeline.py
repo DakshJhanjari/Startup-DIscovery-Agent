@@ -106,21 +106,12 @@ def run_internship_pipeline():
         
         logger.info(f"Selected {len(selected_startups)} startups for deep research.")
         
-        # 4. Send header message to each active user (deduplicated per user per date)
-        today_str = datetime.date.today().strftime('%Y-%m-%d')
-        for user in subscribed_users:
-            header = (
-                f"💼 *Daily Internship Research Report - {today_str}*\n"
-                f"Here are {len(selected_startups)} unresearched startups evaluated for your target roles today:"
-            )
-            researcher.send_telegram_report(header, chat_id=user.telegram_chat_id)
-        
-        # 5. Research each startup and deliver customized reports
+        # 4. Research each startup and deliver customized reports directly
         for idx, startup in enumerate(selected_startups, 1):
             if idx > 1:
-                logger.info("Sleeping for 20 seconds to prevent hitting Gemini API rate limits (RPM)...")
+                logger.info("Sleeping for 10 seconds between startups...")
                 import time
-                time.sleep(20)
+                time.sleep(10)
                 
             logger.info(f"Researching startup {idx}/{len(selected_startups)}: {startup.name}")
             analysis = researcher.research_startup(
@@ -153,7 +144,9 @@ def run_internship_pipeline():
                     
                 role_fits_str = "\n\n".join(role_fits)
                 
+                header_prefix = f"💼 *Daily Internship Pick ({idx}/{len(selected_startups)})*\n\n" if idx == 1 else ""
                 startup_report = (
+                    f"{header_prefix}"
                     f"🏢 *{startup.name}*{website_str}\n"
                     f"💰 *Funding Status*:{funding_str or ' N/A'}\n"
                     f"🎯 *Mission*: {analysis.mission}\n"

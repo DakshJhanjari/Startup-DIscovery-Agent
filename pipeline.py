@@ -16,6 +16,8 @@ from services.video_vision import VideoVisionService
 from services.inc42_scraper import Inc42Scraper
 from services.shark_tank_scraper import SharkTankScraper
 from services.a2a_client import A2AEmailDrafterClient
+from services.appwrite_client import AppwriteClient
+from services.ats_crawler import ATSCrawlerService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -38,6 +40,9 @@ class PipelineRunner:
         self.lead_min_confidence = float(os.getenv("LEAD_MIN_CONFIDENCE", "0.0"))
         self.enable_lead_finder = os.getenv("ENABLE_LEAD_FINDER", "true").lower() == "true"
         self.a2a_email_drafter = A2AEmailDrafterClient()
+        # Appwrite Cloud sync (best-effort — disabled gracefully if key not set)
+        self.appwrite = AppwriteClient()
+        self.ats_crawler = ATSCrawlerService()
         
         keywords_str = os.getenv(
             "SEARCH_KEYWORDS", 
@@ -99,9 +104,14 @@ class PipelineRunner:
                     final_confidence = (base_confidence * 0.4) + (verification.adjusted_confidence * web_weight)
                     final_confidence = min(max(final_confidence, 0.0), 1.0)
                     
+                    # Check for direct ATS or careers page
+                    careers_url, ats_provider = self.ats_crawler.discover_careers_url(startup_name, s_dict.get("website"))
+                    
                     new_startup = Startup(
                         name=startup_name,
                         website=s_dict.get("website"),
+                        careers_url=careers_url,
+                        ats_provider=ats_provider,
                         funding_amount=s_dict.get("funding_amount"),
                         funding_amount_numeric=s_dict.get("funding_amount_numeric"),
                         funding_round=s_dict.get("funding_round"),
@@ -117,6 +127,8 @@ class PipelineRunner:
                     )
                     db.add(new_startup)
                     db.flush()
+                    # Sync to Appwrite Cloud (best-effort)
+                    self.appwrite.upsert_startup(new_startup.to_dict())
                     
                     discovered_startups_batch.append(new_startup.to_dict())
                     stats["startups_discovered"] += 1
@@ -316,9 +328,14 @@ class PipelineRunner:
                         # Determine source: vision-extracted entries have timestamp like "vision_frame@651s"
                         startup_source = "vision" if (estartup.timestamp or "").startswith("vision_frame@") else "youtube"
 
+                        # Check for direct ATS or careers page
+                        careers_url, ats_provider = self.ats_crawler.discover_careers_url(startup_name, estartup.website)
+
                         new_startup = Startup(
                             name=startup_name,
                             website=estartup.website if estartup.website else None,
+                            careers_url=careers_url,
+                            ats_provider=ats_provider,
                             funding_amount=estartup.funding_amount,
                             funding_amount_numeric=estartup.funding_amount_numeric,
                             funding_round=estartup.funding_round,
@@ -334,6 +351,8 @@ class PipelineRunner:
                         )
                         db.add(new_startup)
                         db.flush()
+                        # Sync to Appwrite Cloud (best-effort)
+                        self.appwrite.upsert_startup(new_startup.to_dict())
 
                         discovered_startups_batch.append(new_startup.to_dict())
                         startups_saved += 1
@@ -487,6 +506,9 @@ class PipelineRunner:
                 source=lead.source if hasattr(lead, "source") else "google_dork",
             )
             db.add(profile)
+            db.flush()
+            # Sync to Appwrite Cloud (best-effort)
+            self.appwrite.upsert_lead(profile.to_dict())
             saved += 1
 
         logger.info(f"Saved {saved} new LinkedIn lead(s) for startup '{startup.name}'.")
