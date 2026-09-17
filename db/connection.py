@@ -40,6 +40,14 @@ def init_db():
                     conn.execute(text("ALTER TABLE lead_profiles ADD COLUMN email_drafted BOOLEAN DEFAULT 0"))
                 if "email_drafted_at" not in columns:
                     conn.execute(text("ALTER TABLE lead_profiles ADD COLUMN email_drafted_at DATETIME"))
+
+                # Check startups columns
+                result_s = conn.execute(text("PRAGMA table_info(startups)"))
+                s_columns = [row[1] for row in result_s.fetchall()]
+                if "careers_url" not in s_columns:
+                    conn.execute(text("ALTER TABLE startups ADD COLUMN careers_url TEXT"))
+                if "ats_provider" not in s_columns:
+                    conn.execute(text("ALTER TABLE startups ADD COLUMN ats_provider VARCHAR(50)"))
                 conn.commit()
             except Exception:
                 pass
