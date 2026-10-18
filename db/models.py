@@ -126,6 +126,8 @@ class LeadProfile(Base):
     # Quality signals
     confidence_score = Column(Float, default=0.0)   # 0.0–1.0, LLM-assessed match quality
     source = Column(String(50), default="google_dork")  # "website_scrape" | "google_dork"
+    # Email enrichment via Hunter.io (nullable — populated post-lead-discovery)
+    email = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     def to_dict(self):
@@ -138,6 +140,7 @@ class LeadProfile(Base):
             "linkedin_url": self.linkedin_url,
             "confidence_score": self.confidence_score,
             "source": self.source,
+            "email": self.email,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

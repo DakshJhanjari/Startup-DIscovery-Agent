@@ -442,6 +442,62 @@ def find_leads_shark_tank():
             logger.info("=== PHASE 2: Re-verifying earlier startups ===")
             process_batch(earlier_reverify, "Phase 2 (Re-verification)")
 
+def enrich_lead_emails(startup_name: str = None):
+    """
+    Finds and enriches email addresses for existing leads in the database
+    using Hunter.io's Email Finder API.
+    """
+    logger.info("Starting email enrichment via Hunter.io API...")
+    from db.connection import get_db, init_db
+    from db.models import LeadProfile, Startup, SharkTankStartup
+    from services.email_finder import HunterEmailFinder
+    from services.sheets import GoogleSheetsService
+
+    init_db()
+    finder = HunterEmailFinder()
+    if not finder.api_key:
+        logger.error("HUNTER_API_KEY environment variable is not set. Cannot run email enrichment.")
+        return
+
+    sheets = GoogleSheetsService()
+    enriched_count = 0
+
+    with get_db() as db:
+        query = db.query(LeadProfile).filter(
+            (LeadProfile.email.is_(None)) | (LeadProfile.email == "")
+        )
+        if startup_name:
+            query = query.filter(LeadProfile.startup_name.ilike(startup_name))
+
+        leads = query.all()
+        logger.info(f"Found {len(leads)} lead(s) without email to enrich.")
+
+        # Pre-load websites for startups
+        startup_websites = {s.name.lower(): s.website for s in db.query(Startup).all() if s.website}
+        st_websites = {s.name.lower(): s.website for s in db.query(SharkTankStartup).all() if s.website}
+
+        updated_leads = []
+        for lead in leads:
+            website = startup_websites.get(lead.startup_name.lower()) or st_websites.get(lead.startup_name.lower())
+            try:
+                email = finder.find_email_for_lead(lead, db, website=website)
+                if email:
+                    lead.email = email
+                    enriched_count += 1
+                    updated_leads.append(lead.to_dict())
+                    db.commit()
+            except Exception as e:
+                logger.error(f"Error enriching email for '{lead.name}': {e}")
+                db.rollback()
+
+    logger.info(f"Email enrichment complete. Successfully enriched {enriched_count} lead(s).")
+    if updated_leads:
+        try:
+            synced = sheets.sync_leads(updated_leads)
+            logger.info(f"Synced {synced} enriched lead(s) to Google Sheets 'Leads' tab.")
+        except Exception as e:
+            logger.warning(f"Google Sheets sync failed: {e}")
+
 def start_dashboard():
     """Runs the FastAPI dashboard web server."""
     port = int(os.getenv("PORT", "8000"))
@@ -502,6 +558,17 @@ def main():
         action="store_true",
         help="Backfill LinkedIn leads for all valid Shark Tank India startups in the DB"
     )
+    group.add_argument(
+        "--enrich-emails",
+        action="store_true",
+        help="Enrich leads with professional email IDs using Hunter.io API"
+    )
+    group.add_argument(
+        "--enrich-emails-for",
+        metavar="STARTUP_NAME",
+        type=str,
+        help="Enrich leads with email IDs for a specific startup by name using Hunter.io"
+    )
 
     args = parser.parse_args()
 
@@ -521,9 +588,14 @@ def main():
         find_leads_for_startup(args.find_leads_for)
     elif args.find_leads_shark_tank:
         find_leads_shark_tank()
+    elif args.enrich_emails:
+        enrich_lead_emails()
+    elif args.enrich_emails_for:
+        enrich_lead_emails(args.enrich_emails_for)
     else:
         start_dashboard()
 
 if __name__ == "__main__":
     main()
+
 

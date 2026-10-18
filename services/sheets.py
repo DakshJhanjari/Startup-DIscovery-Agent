@@ -4,12 +4,40 @@ from typing import List, Dict, Any
 import gspread
 from google.oauth2.service_account import Credentials
 
+import re
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    if os.path.exists(".env"):
+        with open(".env", "r", encoding="utf-8") as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if _line and not _line.startswith("#") and "=" in _line:
+                    _k, _v = _line.split("=", 1)
+                    _k = _k.strip()
+                    _v = _v.strip().strip("'\"")
+                    if _k not in os.environ:
+                        os.environ[_k] = _v
+
 logger = logging.getLogger(__name__)
+
+def _clean_spreadsheet_id(raw_id: str) -> str:
+    """Extracts the spreadsheet ID if the user provided a full Google Sheets URL."""
+    if not raw_id:
+        return ""
+    raw_id = raw_id.strip()
+    match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", raw_id)
+    if match:
+        return match.group(1)
+    return raw_id
 
 class GoogleSheetsService:
     def __init__(self):
         self.credentials_path = os.getenv("GOOGLE_SHEETS_CREDENTIALS_JSON")
-        self.spreadsheet_id = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID")
+        raw_sheet_id = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
+        self.spreadsheet_id = _clean_spreadsheet_id(raw_sheet_id)
         self.client = None
         self.sheet = None
         
@@ -28,13 +56,13 @@ class GoogleSheetsService:
         ]
 
     def _connect(self) -> bool:
-        """Connects to Google Sheets using service account credentials."""
-        if not self.credentials_path or not os.path.exists(self.credentials_path):
-            logger.warning(f"Google Sheets credentials file '{self.credentials_path}' not found. Skipping Sheets integration.")
-            return False
-        
+        """Connects to Google Sheets using service account credentials (file path or JSON string)."""
         if not self.spreadsheet_id:
             logger.warning("GOOGLE_SHEETS_SPREADSHEET_ID is not configured. Skipping Sheets integration.")
+            return False
+
+        if not self.credentials_path:
+            logger.warning("GOOGLE_SHEETS_CREDENTIALS_JSON is not configured. Skipping Sheets integration.")
             return False
 
         try:
@@ -42,9 +70,17 @@ class GoogleSheetsService:
                 "https://www.googleapis.com/auth/spreadsheets",
                 "https://www.googleapis.com/auth/drive"
             ]
-            creds = Credentials.from_service_account_file(self.credentials_path, scopes=scopes)
+            if os.path.exists(self.credentials_path):
+                creds = Credentials.from_service_account_file(self.credentials_path, scopes=scopes)
+            elif self.credentials_path.strip().startswith("{"):
+                import json
+                info = json.loads(self.credentials_path)
+                creds = Credentials.from_service_account_info(info, scopes=scopes)
+            else:
+                logger.warning(f"Google Sheets credentials file '{self.credentials_path}' not found. Skipping Sheets integration.")
+                return False
+
             self.client = gspread.authorize(creds)
-            
             spreadsheet = self.client.open_by_key(self.spreadsheet_id)
             self.sheet = spreadsheet.get_worksheet(0)
             
@@ -169,6 +205,7 @@ class GoogleSheetsService:
             "Confidence Score",
             "Source",
             "Discovered At",
+            "Email ID",
         ]
 
         try:
@@ -182,18 +219,61 @@ class GoogleSheetsService:
                 leads_sheet.append_row(lead_headers)
                 logger.info("Created 'Leads' worksheet tab in Google Sheets.")
 
-            # Deduplicate against existing LinkedIn URLs already in the sheet
-            existing_records = leads_sheet.get_all_records()
-            existing_urls = {
-                str(r.get("LinkedIn URL", "")).strip().lower()
-                for r in existing_records
-            }
+            first_row = leads_sheet.row_values(1)
+            if not first_row:
+                leads_sheet.append_row(lead_headers)
+                first_row = lead_headers
+
+            # Dynamically locate column indices for Email and LinkedIn URL
+            email_col_idx = None
+            linkedin_col_idx = 4
+            for c_idx, h in enumerate(first_row, 1):
+                clean_h = str(h).strip().lower()
+                if "email" in clean_h:
+                    email_col_idx = c_idx
+                elif "linkedin" in clean_h:
+                    linkedin_col_idx = c_idx
+
+            if not email_col_idx:
+                email_col_idx = len(first_row) + 1
+                leads_sheet.update_cell(1, email_col_idx, "Email ID")
+                logger.info(f"Added 'Email ID' header at Column {email_col_idx}.")
+
+            # Read all existing rows to map URLs and existing emails
+            all_values = leads_sheet.get_all_values()
+            existing_map = {}
+            for r_idx, row in enumerate(all_values[1:], start=2):  # row 1 is header
+                url = row[linkedin_col_idx - 1].strip().lower() if len(row) >= linkedin_col_idx else ""
+                cur_email = row[email_col_idx - 1].strip() if len(row) >= email_col_idx else ""
+                if url:
+                    existing_map[url] = {
+                        "row": r_idx,
+                        "email": cur_email,
+                    }
 
             rows_to_append = []
             for lead in leads:
                 url = str(lead.get("linkedin_url", "")).strip()
-                if not url or url.lower() in existing_urls:
+                if not url:
                     continue
+                url_lower = url.lower()
+                new_email = str(lead.get("email", "") or "").strip()
+
+                if url_lower in existing_map:
+                    # Lead already exists in the sheet
+                    old_info = existing_map[url_lower]
+                    old_email = old_info["email"]
+                    # If email was empty or placeholder ('.', '-'), update in-place
+                    if (not old_email or old_email in (".", "-")) and new_email:
+                        try:
+                            leads_sheet.update_cell(old_info["row"], email_col_idx, new_email)
+                            old_info["email"] = new_email
+                            logger.info(f"Updated email in Google Sheet for row {old_info['row']} ({url}): {new_email}")
+                        except Exception as cell_err:
+                            logger.warning(f"Failed to update email cell for row {old_info['row']}: {cell_err}")
+                    continue
+
+                # Prepare new row matching sheet layout
                 rows_to_append.append([
                     lead.get("startup_name", ""),
                     lead.get("name", ""),
@@ -202,12 +282,13 @@ class GoogleSheetsService:
                     lead.get("confidence_score", 0.0),
                     lead.get("source", ""),
                     lead.get("created_at", ""),
+                    new_email,
                 ])
-                existing_urls.add(url.lower())
+                existing_map[url_lower] = {"row": None, "email": new_email}
 
             if rows_to_append:
-                self._append_rows_safely(leads_sheet, rows_to_append, "A", "G")
-                logger.info(f"Synced {len(rows_to_append)} lead(s) to 'Leads' Google Sheets tab.")
+                self._append_rows_safely(leads_sheet, rows_to_append, "A", "H")
+                logger.info(f"Synced {len(rows_to_append)} new lead(s) to 'Leads' Google Sheets tab.")
             return len(rows_to_append)
 
         except Exception as e:

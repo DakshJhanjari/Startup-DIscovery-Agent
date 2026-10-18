@@ -15,6 +15,7 @@ from services.linkedin_finder import LinkedInFinderService
 from services.video_vision import VideoVisionService
 from services.inc42_scraper import Inc42Scraper
 from services.shark_tank_scraper import SharkTankScraper
+from services.email_finder import HunterEmailFinder
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class PipelineRunner:
         self.sheets = GoogleSheetsService()
         self.reporter = ReporterService()
         self.lead_finder = LinkedInFinderService()
+        self.email_finder = HunterEmailFinder()  # Hunter.io email enrichment (optional)
         self.video_vision = VideoVisionService()
         self.inc42 = Inc42Scraper()
         self.shark_tank = SharkTankScraper()
@@ -442,6 +444,19 @@ class PipelineRunner:
                 source=lead.source if hasattr(lead, "source") else "google_dork",
             )
             db.add(profile)
+            db.flush()  # flush so profile.id is available if needed
+
+            # --- Hunter.io email enrichment (optional, quota-guarded) ---
+            try:
+                email = self.email_finder.find_email_for_lead(profile, db, website=startup.website)
+                if email:
+                    profile.email = email
+                    logger.info(
+                        f"[Hunter] Email enriched for '{lead.name}' @ '{startup.name}': {email}"
+                    )
+            except Exception as hunter_err:
+                logger.warning(f"[Hunter] Email enrichment failed for '{lead.name}': {hunter_err}")
+
             saved += 1
 
         logger.info(f"Saved {saved} new LinkedIn lead(s) for startup '{startup.name}'.")
@@ -494,6 +509,21 @@ class PipelineRunner:
                         source="batched_dork",
                     )
                     db.add(profile)
+                    db.flush()  # flush so profile.id is available if needed
+
+                    # --- Hunter.io email enrichment (optional, quota-guarded) ---
+                    try:
+                        email = self.email_finder.find_email_for_lead(profile, db, website=target_startup.website)
+                        if email:
+                            profile.email = email
+                            logger.info(
+                                f"[Hunter] Email enriched for '{cand.name}' @ '{target_startup.name}': {email}"
+                            )
+                    except Exception as hunter_err:
+                        logger.warning(
+                            f"[Hunter] Email enrichment failed for '{cand.name}': {hunter_err}"
+                        )
+
                     total_saved += 1
             except Exception as batch_err:
                 logger.error(f"Batched lead finding failed for chunk starting at index {i}: {batch_err}")
