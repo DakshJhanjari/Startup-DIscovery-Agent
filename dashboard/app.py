@@ -29,13 +29,17 @@ lead_finder = LinkedInFinderService()
 
 @app.on_event("startup")
 def startup_event():
-    logger.info("FastAPI dashboard starting up. Launching scheduler...")
-    scheduler.start()
+    if os.getenv("ENABLE_DASHBOARD_SCHEDULER", "false").lower() == "true":
+        logger.info("FastAPI dashboard starting up. Launching scheduler...")
+        scheduler.start()
+    else:
+        logger.info("FastAPI dashboard starting up. Standalone scheduler is managed externally.")
 
 @app.on_event("shutdown")
 def shutdown_event():
-    logger.info("FastAPI dashboard shutting down. Stopping scheduler...")
-    scheduler.shutdown()
+    if os.getenv("ENABLE_DASHBOARD_SCHEDULER", "false").lower() == "true":
+        logger.info("FastAPI dashboard shutting down. Stopping scheduler...")
+        scheduler.shutdown()
 
 is_pipeline_running = False
 

@@ -1,3 +1,5 @@
+import threading
+_pipeline_lock = threading.Lock()
 import os
 import logging
 import datetime
@@ -47,6 +49,16 @@ class PipelineRunner:
 
     def run(self) -> Dict[str, Any]:
         """Runs the entire pipeline workflow."""
+        if not _pipeline_lock.acquire(blocking=False):
+            logger.warning("Pipeline is already currently executing. Skipping duplicate concurrent run.")
+            return {"status": "skipped", "reason": "already_running"}
+        try:
+            return self._run_internal()
+        finally:
+            _pipeline_lock.release()
+
+    def _run_internal(self) -> Dict[str, Any]:
+        """Internal implementation of pipeline workflow."""
         logger.info("Starting Startup Discovery Pipeline Run...")
         stats = {
             "start_time": datetime.datetime.utcnow().isoformat(),
@@ -390,12 +402,11 @@ class PipelineRunner:
             except Exception as lead_sheet_err:
                 logger.error(f"Google Sheets leads sync failed: {lead_sheet_err}")
 
-        if discovered_startups_batch:
-            try:
-                report_path = self.reporter.generate_daily_report(discovered_startups_batch)
-                stats["report_path"] = report_path
-            except Exception as rep_err:
-                logger.error(f"Failed to generate daily report: {rep_err}")
+        try:
+            report_path = self.reporter.send_daily_summary(discovered_startups_batch, stats)
+            stats["report_path"] = report_path
+        except Exception as rep_err:
+            logger.error(f"Failed to generate daily report: {rep_err}")
 
         stats["end_time"] = datetime.datetime.utcnow().isoformat()
         logger.info(f"Pipeline Run Completed! Stats: {stats}")

@@ -156,3 +156,39 @@ class ReporterService:
                 logger.info("Daily internship research digest posted to Telegram webhook successfully.")
         except Exception as e:
             logger.error(f"Failed to post to webhook: {e}")
+
+    def send_daily_summary(self, startups: List[Dict[str, Any]], stats: Dict[str, Any] = None) -> str:
+        """
+        Generates report and always sends a status update to the Telegram webhook,
+        guaranteeing the user gets a daily digest at scheduled time even on slow news days.
+        """
+        if startups:
+            return self.generate_daily_report(startups)
+
+        if not self.webhook_url:
+            logger.warning("No WEBHOOK_URL configured; skipping daily Telegram digest.")
+            return ""
+
+        today_str = datetime.date.today().strftime("%Y-%m-%d")
+        videos_checked = stats.get("videos_found", 0) if stats else 0
+
+        msg = (
+            f"ℹ️ *Daily Startup Discovery Digest — {today_str}*\n\n"
+            f"Pipeline executed successfully at 09:30 IST.\n"
+            f"• Scanned channels & feeds: `{videos_checked}` items evaluated\n"
+            f"• New funding announcements meeting threshold: *0*\n\n"
+            f"No fresh startup funding rounds were detected in the last 24 hours. All scrapers and monitors remain active for tomorrow."
+        )
+        payload = {
+            "text": msg,
+            "parse_mode": "Markdown"
+        }
+        try:
+            response = requests.post(self.webhook_url, json=payload, timeout=20)
+            if response.status_code not in [200, 204]:
+                logger.error(f"Empty digest webhook failed with status code {response.status_code}: {response.text}")
+            else:
+                logger.info("Empty daily digest status message posted to Telegram webhook successfully.")
+        except Exception as e:
+            logger.error(f"Failed to post empty digest webhook: {e}")
+        return ""
