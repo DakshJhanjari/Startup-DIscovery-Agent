@@ -5,12 +5,9 @@ services:
     restart: always
     ports:
       - "80:8000"
+    env_file:
+      - .env
     volumes:
       - ./startups.db:/app/startups.db
       - ./reports:/app/reports
-    environment:
-      - PORT=8000
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - GOOGLE_SHEETS_CREDENTIALS_JSON=${GOOGLE_SHEETS_CREDENTIALS_JSON}
-      - GOOGLE_SHEETS_SPREADSHEET_ID=${GOOGLE_SHEETS_SPREADSHEET_ID}
+      - ./credentials.json:/app/credentials.json:ro
