@@ -22,7 +22,7 @@ class InternshipResearcher:
         self.webhook_url = os.getenv("TELEGRAM_WEBHOOK_URL")
         self.gemini_key = os.getenv("GEMINI_API_KEY")
         self.client = genai.Client(api_key=self.gemini_key)
-        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
         
         # Resolve Bot Token
         self.bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -65,6 +65,7 @@ class InternshipResearcher:
             f"Ensure the results specifically talk about '{startup_name}' and not a different company with a similar name."
         )
         
+        raw_research_text = None
         try:
             grounded_response = self.client.models.generate_content(
                 model=self.gemini_model,
@@ -74,11 +75,18 @@ class InternshipResearcher:
                 )
             )
             raw_research_text = grounded_response.text
-            if not raw_research_text:
-                logger.warning(f"No research text returned for {startup_name}")
-                return None
         except Exception as e:
-            logger.error(f"Grounded search failed for {startup_name}: {e}")
+            logger.warning(f"Google Search Grounding failed for {startup_name} ({e}). Falling back to DuckDuckGo search...")
+            try:
+                from duckduckgo_search import DDGS
+                with DDGS() as ddgs:
+                    results = list(ddgs.text(f"{startup_name} startup funding mission India", max_results=4))
+                    raw_research_text = "\n".join([r.get("body", "") for r in results if r.get("body")])
+            except Exception as ddg_err:
+                logger.error(f"DuckDuckGo search fallback also failed for {startup_name}: {ddg_err}")
+
+        if not raw_research_text:
+            logger.warning(f"No research text could be obtained for {startup_name}")
             return None
  
         # Step 2: JSON Structuring and Fit Analysis

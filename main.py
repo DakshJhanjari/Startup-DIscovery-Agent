@@ -564,6 +564,11 @@ def main():
         help="Enrich leads with professional email IDs using Hunter.io API"
     )
     group.add_argument(
+        "--run-internships",
+        action="store_true",
+        help="Run the internship research pipeline and deliver personalized cards to subscribers"
+    )
+    group.add_argument(
         "--enrich-emails-for",
         metavar="STARTUP_NAME",
         type=str,
@@ -590,6 +595,9 @@ def main():
         find_leads_shark_tank()
     elif args.enrich_emails:
         enrich_lead_emails()
+    elif args.run_internships:
+        from internship_pipeline import run_internship_pipeline
+        run_internship_pipeline()
     elif args.enrich_emails_for:
         enrich_lead_emails(args.enrich_emails_for)
     else:

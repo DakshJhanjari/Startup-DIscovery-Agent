@@ -12,6 +12,21 @@ class PipelineScheduler:
         self.runner = PipelineRunner()
         self.daily_time = os.getenv("DAILY_RUN_TIME", "02:00")
 
+    def _run_daily_suite(self):
+        """Runs the discovery pipeline and then dispatches personalized internship research cards to subscribers."""
+        logger.info("Executing scheduled daily startup discovery...")
+        try:
+            self.runner.run()
+        except Exception as e:
+            logger.error(f"Error in discovery pipeline run: {e}")
+
+        logger.info("Executing scheduled daily internship subscription dispatch...")
+        try:
+            from internship_pipeline import run_internship_pipeline
+            run_internship_pipeline()
+        except Exception as e:
+            logger.error(f"Error in internship subscription pipeline run: {e}")
+
     def start(self):
         """Starts the background scheduler."""
         try:
@@ -29,7 +44,7 @@ class PipelineScheduler:
         logger.info(f"Scheduling discovery pipeline to run daily at {hour:02d}:{minute:02d} IST")
         
         self.scheduler.add_job(
-            func=self.runner.run,
+            func=self._run_daily_suite,
             trigger="cron",
             hour=hour,
             minute=minute,
