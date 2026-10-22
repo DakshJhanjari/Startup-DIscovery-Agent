@@ -132,8 +132,18 @@ def run_internship_pipeline():
                     f"{role_fits_str}"
                 )
                 
-                logger.info(f"Delivering customized card for {startup.name} to user {user.telegram_chat_id}")
-                researcher.send_telegram_report(startup_report, chat_id=user.telegram_chat_id)
+                markup = {
+                    "inline_keyboard": [
+                        [
+                            {"text": "✉️ Send to Email Agent (Draft Cold Email)", "callback_data": f"draft_email_{startup.id}"}
+                        ]
+                    ]
+                }
+                if startup.website and startup.website.startswith("http"):
+                    markup["inline_keyboard"][0].append({"text": "🌐 Website", "url": startup.website})
+
+                logger.info(f"Delivering customized card with email draft action for {startup.name} to user {user.telegram_chat_id}")
+                researcher.send_telegram_report(startup_report, chat_id=user.telegram_chat_id, reply_markup=markup)
                 dispatched = True
 
             # Mark as researched only after processing & dispatch completes

@@ -165,9 +165,10 @@ class InternshipResearcher:
             logger.error(f"Failed to structure research for {startup_name}: {e}")
             return None
 
-    def send_telegram_report(self, report_md: str, chat_id: Optional[int] = None) -> bool:
+    def send_telegram_report(self, report_md: str, chat_id: Optional[int] = None, reply_markup: Optional[Dict[str, Any]] = None) -> bool:
         """
         Sends the compiled markdown report to a specific Telegram chat_id or the default webhook.
+        Supports optional interactive inline keyboard reply_markup.
         """
         url = self.webhook_url
         if chat_id and self.bot_token:
@@ -185,6 +186,8 @@ class InternshipResearcher:
             }
             if chat_id and self.bot_token:
                 payload["chat_id"] = chat_id
+            if reply_markup:
+                payload["reply_markup"] = reply_markup
                 
             response = requests.post(url, json=payload, timeout=15)
             if response.status_code in [200, 204]:

@@ -313,6 +313,10 @@ def handle_update(update: dict):
         elif data.startswith("discover_"):
             startup_id = int(data.split("_")[1])
             threading.Thread(target=_bg_discover, args=(chat_id, startup_id), daemon=True).start()
+            
+        elif data.startswith("draft_email_"):
+            startup_id = int(data.split("_")[2])
+            threading.Thread(target=_bg_draft_cold_email, args=(chat_id, startup_id), daemon=True).start()
 
 
 def poll_updates():
