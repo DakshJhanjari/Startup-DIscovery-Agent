@@ -18,6 +18,39 @@ class ResearchAnalysis(BaseModel):
     fo_fit: str = Field(description="Detailed analysis of why this company is a good fit for a Founder's Office internship, based on their scale and dynamic needs.")
 
 class InternshipResearcher:
+    def _fetch_search_snippets(self, startup_name: str) -> str:
+        """Fetches fresh news and web snippets for an Indian startup via free Google News RSS and DuckDuckGo."""
+        snippets = []
+        try:
+            import urllib.request
+            import urllib.parse
+            import xml.etree.ElementTree as ET
+            query = urllib.parse.quote_plus(f"{startup_name} startup funding India")
+            url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                root = ET.fromstring(resp.read())
+                items = root.findall('.//item')
+                for it in items[:6]:
+                    title = it.find('title')
+                    if title is not None and title.text:
+                        snippets.append(title.text)
+        except Exception as rss_err:
+            logger.warning(f"Google News RSS search failed for {startup_name}: {rss_err}")
+
+        if not snippets:
+            try:
+                from duckduckgo_search import DDGS
+                with DDGS() as ddgs:
+                    results = list(ddgs.text(f"{startup_name} startup funding India", max_results=3))
+                    for r in results:
+                        if r.get("body"):
+                            snippets.append(r.get("body"))
+            except Exception as ddg_err:
+                logger.warning(f"DDGS search failed for {startup_name}: {ddg_err}")
+
+        return "\n".join(snippets)
+
     def __init__(self):
         self.webhook_url = os.getenv("TELEGRAM_WEBHOOK_URL")
         self.gemini_key = os.getenv("GEMINI_API_KEY")
@@ -76,14 +109,8 @@ class InternshipResearcher:
             )
             raw_research_text = grounded_response.text
         except Exception as e:
-            logger.warning(f"Google Search Grounding failed for {startup_name} ({e}). Falling back to DuckDuckGo search...")
-            try:
-                from duckduckgo_search import DDGS
-                with DDGS() as ddgs:
-                    results = list(ddgs.text(f"{startup_name} startup funding mission India", max_results=4))
-                    raw_research_text = "\n".join([r.get("body", "") for r in results if r.get("body")])
-            except Exception as ddg_err:
-                logger.error(f"DuckDuckGo search fallback also failed for {startup_name}: {ddg_err}")
+            logger.warning(f"Google Search Grounding failed for {startup_name} ({e}). Falling back to Google News RSS search...")
+            raw_research_text = self._fetch_search_snippets(startup_name)
 
         if not raw_research_text:
             logger.warning(f"No research text could be obtained for {startup_name}")
